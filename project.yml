@@ -1,0 +1,77 @@
+name: watchCat
+options:
+  bundleIdPrefix: com.dayflow
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: ko
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "6.29.0"
+
+targets:
+  watchCat:
+    type: application
+    platform: macOS
+    sources:
+      - path: watchCat
+        excludes:
+          - "Info.plist"
+          - "watchCat.entitlements"
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dayflow.watchCat
+        PRODUCT_NAME: watchCat
+        CODE_SIGN_ENTITLEMENTS: watchCat/watchCat.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        DEAD_CODE_STRIPPING: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+    info:
+      path: watchCat/Info.plist
+      properties:
+        CFBundleName: watchCat
+        CFBundleDisplayName: watchCat
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSUIElement: true
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "© 2026 watchCat"
+        NSAppleEventsUsageDescription: "watchCat은 Chrome의 활성 탭 정보를 읽어 웹페이지별 사용시간을 기록합니다. 데이터는 외부로 전송되지 않고 로컬에만 저장됩니다."
+
+  watchCatTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: watchCatTests
+    dependencies:
+      - target: watchCat
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dayflow.watchCatTests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/watchCat.app/Contents/MacOS/watchCat"
+
+schemes:
+  watchCat:
+    build:
+      targets:
+        watchCat: all
+        watchCatTests: [test]
+    test:
+      targets:
+        - watchCatTests

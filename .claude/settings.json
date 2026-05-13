@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/usr/bin/grep -E '\\(Test Case|Test Suite|error:|BUILD|FAILED|passed|failed|Executed\\)')",
+      "Bash(/usr/bin/grep -E 'error:')"
+    ]
+  }
+}
