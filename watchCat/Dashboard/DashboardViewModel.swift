@@ -35,6 +35,11 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var appTotals: [AppTotal] = []
     @Published private(set) var categoryTotals: [CategoryTotal] = []
     @Published private(set) var webTotals: [WebBucketTotal] = []
+    /// Per-browser page breakdown for the app-list drill-down. Keyed by browser
+    /// bundle ID so the row can look itself up. Populated for every supported
+    /// browser even when empty so the expanded view can render the "no pages"
+    /// placeholder without an extra fetch.
+    @Published private(set) var webByBrowser: [String: [WebBucketTotal]] = [:]
     @Published private(set) var dailySeries: [DailySeriesPoint] = []
     @Published private(set) var hourlySeries: [DailySeriesPoint] = []
     @Published private(set) var topAppSeries: [AppDailySeries] = []
@@ -119,6 +124,13 @@ final class DashboardViewModel: ObservableObject {
             self.appTotals = try store.appTotals(in: r, asOf: now)
             self.categoryTotals = try store.categoryTotals(in: r, asOf: now)
             self.webTotals = try store.webBucketTotals(in: r, asOf: now)
+            var perBrowser: [String: [WebBucketTotal]] = [:]
+            for kind in BrowserKind.allCases {
+                perBrowser[kind.bundleID] = try store.webBucketTotals(
+                    in: r, browserBundleID: kind.bundleID, asOf: now
+                )
+            }
+            self.webByBrowser = perBrowser
             self.dailySeries = try store.dailySeries(in: r, asOf: now)
             self.hourlySeries = try store.hourlyTotals(in: r, calendar: calendar, asOf: now)
             self.topAppSeries = try store.topAppDailySeries(in: r, limit: 5, asOf: now)

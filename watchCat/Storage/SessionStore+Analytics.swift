@@ -127,18 +127,26 @@ extension SessionStore {
         return ordered
     }
 
-    /// Web bucket totals across the range (SPEC §F3).
-    func webBucketTotals(in range: DayRange, asOf: Date = Date()) throws -> [WebBucketTotal] {
+    /// Web bucket totals across the range (SPEC §F3). Filters by `browserBundleID`
+    /// when set (e.g., to attribute page rows under a specific browser in the
+    /// dashboard); `nil` aggregates every browser like the old behavior.
+    func webBucketTotals(in range: DayRange, browserBundleID: String? = nil,
+                         asOf: Date = Date()) throws -> [WebBucketTotal] {
         let (first, last) = range.dayKeys
         return try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: """
+            var sql = """
                 SELECT bucket,
                        SUM((julianday(COALESCE(endAt, ?)) - julianday(startAt)) * 86400.0) AS seconds
                 FROM \(WebSessionRecord.databaseTableName)
                 WHERE day BETWEEN ? AND ?
-                GROUP BY bucket
-                ORDER BY seconds DESC
-                """, arguments: [asOf, first, last])
+                """
+            var args: [DatabaseValueConvertible] = [asOf, first, last]
+            if let browserBundleID {
+                sql += " AND browserBundleID = ?"
+                args.append(browserBundleID)
+            }
+            sql += " GROUP BY bucket ORDER BY seconds DESC"
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
             return rows.map { WebBucketTotal(bucket: $0["bucket"], seconds: $0["seconds"] ?? 0) }
         }
     }

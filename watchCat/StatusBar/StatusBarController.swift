@@ -10,19 +10,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let sessionStore: SessionStore?
     private var stateSubscription: AnyCancellable?
     private var bucketSubscription: AnyCancellable?
+    private var browserSubscription: AnyCancellable?
     private var resultSubscription: AnyCancellable?
-    private var currentChromeBucket: String?
-    private var lastChromeResult: ChromeTabResult?
+    private var currentBrowserBucket: String?
+    private var currentBrowser: BrowserKind?
+    private var lastBrowserResult: BrowserTabResult?
 
-    /// SPEC §F3.4 — number of per-page rows to show under the Chrome summary row.
-    private static let chromePageRowLimit = 5
+    /// SPEC §F3.4 — number of per-page rows to show under each browser row.
+    private static let browserPageRowLimit = 5
 
     /// SPEC §F3.5.2 — sticky row right below the status line that appears only
     /// when AppleScript is denied. Persisted as an ivar (not rebuilt with the
     /// summary) so it reacts the instant `WebSessionRecorder` notices the
     /// denial, not only on menu open.
     private let permissionAlertItem = NSMenuItem(
-        title: "⚠︎ Chrome 탭 권한 필요 — 클릭해 설정 열기",
+        title: "⚠︎ 브라우저 탭 권한 필요 — 클릭해 설정 열기",
         action: nil, keyEquivalent: ""
     )
 
@@ -134,7 +136,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
 
         // Per-app rows with a category-assignment submenu.
-        let webTotals: [WebBucketTotal] = (try? store.webDailyTotals(for: Date())) ?? []
         for total in appTotals.prefix(3) {
             let cat = mapping[total.bundleID]
             let catLabel = cat?.displayName ?? "미분류"
@@ -143,16 +144,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             item.submenu = makeCategorySubmenu(bundleID: total.bundleID, current: cat)
             insertSummaryRow(item)
 
-            // SPEC §F3.4 — under the Chrome row, surface per-page top-N so users
-            // can see *which* pages contributed to the Chrome total without
-            // opening a separate window.
-            if total.bundleID == ChromeTabReader.chromeBundleID {
-                if webTotals.isEmpty {
+            // SPEC §F3.4 — under each *known* browser row, surface that
+            // browser's top-N pages so users can see which pages contributed
+            // without opening the dashboard. Filtering by browserBundleID
+            // keeps Safari pages from appearing under the Chrome row, etc.
+            if let browser = BrowserKind.from(bundleID: total.bundleID) {
+                let perBrowser: [WebBucketTotal] = (try? store.webDailyTotals(
+                    for: Date(), browserBundleID: browser.bundleID
+                )) ?? []
+                if perBrowser.isEmpty {
                     let empty = NSMenuItem(title: "      (페이지 기록 없음)", action: nil, keyEquivalent: "")
                     empty.isEnabled = false
                     insertSummaryRow(empty)
                 } else {
-                    for web in webTotals.prefix(Self.chromePageRowLimit) {
+                    for web in perBrowser.prefix(Self.browserPageRowLimit) {
                         let pageItem = NSMenuItem(
                             title: "      └ \(web.bucket) — \(Self.format(seconds: web.seconds))",
                             action: nil, keyEquivalent: ""
@@ -230,18 +235,28 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Wires the Chrome page label into the status line. Called from `AppDelegate`
-    /// after both the recorder and the status bar exist.
+    /// Wires the current browser page label into the status line. Called from
+    /// `AppDelegate` after both the recorder and the status bar exist.
     func attach(webRecorder: WebSessionRecorder) {
         bucketSubscription = webRecorder.$currentBucket.sink { [weak self] bucket in
             Task { @MainActor in
-                self?.currentChromeBucket = bucket
+                self?.currentBrowserBucket = bucket
                 self?.apply(state: RecordingStateController.shared.state)
             }
         }
+        // currentBrowser drives the "Chrome / Safari / Whale" prefix on the
+        // status line. Subscribed separately so transitions between browsers
+        // refresh the label even when the bucket happens to stay the same.
+        let browserSink = webRecorder.$currentBrowser.sink { [weak self] browser in
+            Task { @MainActor in
+                self?.currentBrowser = browser
+                self?.apply(state: RecordingStateController.shared.state)
+            }
+        }
+        browserSubscription = browserSink
         resultSubscription = webRecorder.$lastResult.sink { [weak self] result in
             Task { @MainActor in
-                self?.lastChromeResult = result
+                self?.lastBrowserResult = result
                 self?.refreshPermissionAlert()
                 self?.apply(state: RecordingStateController.shared.state)
             }
@@ -253,7 +268,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// user cancelled) — other failures are transient and don't need a banner.
     private func refreshPermissionAlert() {
         let denied: Bool
-        if case .permissionDenied = lastChromeResult { denied = true } else { denied = false }
+        if case .permissionDenied = lastBrowserResult { denied = true } else { denied = false }
         permissionAlertItem.isHidden = !denied
     }
 
@@ -268,15 +283,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         case .recording:
             animator?.setMode(.recording)
             let permissionDenied: Bool
-            if case .permissionDenied = lastChromeResult { permissionDenied = true } else { permissionDenied = false }
+            if case .permissionDenied = lastBrowserResult { permissionDenied = true } else { permissionDenied = false }
             if permissionDenied {
-                // Chrome time is still being captured, but tab info is blocked —
+                // App time is still being captured, but tab info is blocked —
                 // be explicit about *why* page rows aren't appearing.
-                statusLineItem.title = "기록 중 — Chrome 탭 권한 필요"
-                statusItem.button?.toolTip = "watchCat — Chrome 탭 권한이 없어 페이지 단위 기록 불가"
-            } else if let bucket = currentChromeBucket, !bucket.isEmpty {
-                statusLineItem.title = "기록 중 · Chrome / \(bucket)"
-                statusItem.button?.toolTip = "watchCat — 기록 중 · Chrome / \(bucket)"
+                statusLineItem.title = "기록 중 — 브라우저 탭 권한 필요"
+                statusItem.button?.toolTip = "watchCat — 브라우저 탭 권한이 없어 페이지 단위 기록 불가"
+            } else if let bucket = currentBrowserBucket, !bucket.isEmpty {
+                let label = currentBrowser?.displayName ?? "브라우저"
+                statusLineItem.title = "기록 중 · \(label) / \(bucket)"
+                statusItem.button?.toolTip = "watchCat — 기록 중 · \(label) / \(bucket)"
             } else {
                 statusLineItem.title = "기록 중"
                 statusItem.button?.toolTip = "watchCat — 기록 중"

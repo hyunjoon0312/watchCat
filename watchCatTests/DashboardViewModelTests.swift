@@ -120,6 +120,42 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(vm.peakHour, 14)
     }
 
+    func test_webByBrowser_isPopulatedForEverySupportedBrowser() throws {
+        let store = try makeStore()
+        let day = date(2026, 5, 13)
+        let id = try store.startWebSession(
+            at: day.addingTimeInterval(60), bucket: "github.com",
+            url: nil, title: nil, isIncognito: false,
+            browserBundleID: BrowserKind.chrome.bundleID
+        )
+        try store.endWebSession(id: id, at: day.addingTimeInterval(120))
+        let id2 = try store.startWebSession(
+            at: day.addingTimeInterval(200), bucket: "apple.com",
+            url: nil, title: nil, isIncognito: false,
+            browserBundleID: BrowserKind.safari.bundleID
+        )
+        try store.endWebSession(id: id2, at: day.addingTimeInterval(280))
+
+        let vm = DashboardViewModel(store: store)
+        vm.anchor = day
+        vm.setPeriod(.day)
+        vm.reload()
+
+        // Every BrowserKind gets a key — even ones with no rows (so the
+        // expanded view can render its "no pages" placeholder without an
+        // extra synchronous DB hit).
+        for kind in BrowserKind.allCases {
+            XCTAssertNotNil(vm.webByBrowser[kind.bundleID],
+                            "missing key for \(kind.displayName)")
+        }
+        XCTAssertEqual(vm.webByBrowser[BrowserKind.chrome.bundleID]?.count, 1)
+        XCTAssertEqual(vm.webByBrowser[BrowserKind.chrome.bundleID]?.first?.bucket, "github.com")
+        XCTAssertEqual(vm.webByBrowser[BrowserKind.safari.bundleID]?.count, 1)
+        XCTAssertEqual(vm.webByBrowser[BrowserKind.safari.bundleID]?.first?.bucket, "apple.com")
+        XCTAssertEqual(vm.webByBrowser[BrowserKind.whale.bundleID]?.count, 0,
+                       "Whale row has no data this day — empty list, not nil")
+    }
+
     func test_previousPeriodComparison_populatesDelta() throws {
         let store = try makeStore()
         let today = date(2026, 5, 13)

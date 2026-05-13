@@ -101,6 +101,19 @@ final class SessionStore {
                 arguments: [URLUtilities.incognitoBucket, "(인코그니토)"]
             )
         }
+        migrator.registerMigration("v5_web_browser_bundle_id") { db in
+            // Multi-browser support (Chrome + Safari + Whale). Existing rows
+            // were all Chrome by definition — default the column so historical
+            // data keeps a correct attribution without forcing a reset.
+            try db.alter(table: WebSessionRecord.databaseTableName) { t in
+                t.add(column: "browserBundleID", .text)
+                    .notNull()
+                    .defaults(to: BrowserKind.chrome.bundleID)
+            }
+            try db.create(index: "idx_web_sessions_day_browser",
+                          on: WebSessionRecord.databaseTableName,
+                          columns: ["day", "browserBundleID"])
+        }
         try migrator.migrate(dbQueue)
     }
 
@@ -179,7 +192,9 @@ final class SessionStore {
     // MARK: - Web sessions (SPEC §F3)
 
     func startWebSession(at start: Date, bucket: String, url: String?, title: String?,
-                        isIncognito: Bool, calendar: Calendar = .current) throws -> Int64 {
+                        isIncognito: Bool,
+                        browserBundleID: String = BrowserKind.chrome.bundleID,
+                        calendar: Calendar = .current) throws -> Int64 {
         var rec = WebSessionRecord(
             id: nil,
             startAt: start,
@@ -188,6 +203,7 @@ final class SessionStore {
             url: url,
             title: title,
             isIncognito: isIncognito,
+            browserBundleID: browserBundleID,
             day: DayKey.string(for: start, calendar: calendar)
         )
         try dbQueue.write { db in
@@ -205,18 +221,28 @@ final class SessionStore {
         }
     }
 
-    func webDailyTotals(for date: Date, calendar: Calendar = .current,
+    /// Web bucket totals for a single day. When `browserBundleID` is provided,
+    /// only sessions originating from that browser are counted — used by the
+    /// status menu to attribute page rows under the correct browser. With
+    /// `nil`, the result spans every browser.
+    func webDailyTotals(for date: Date, browserBundleID: String? = nil,
+                        calendar: Calendar = .current,
                         asOf: Date = Date()) throws -> [WebBucketTotal] {
         let dayKey = DayKey.string(for: date, calendar: calendar)
         return try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: """
+            var sql = """
                 SELECT bucket,
                        SUM((julianday(COALESCE(endAt, ?)) - julianday(startAt)) * 86400.0) AS seconds
                 FROM \(WebSessionRecord.databaseTableName)
                 WHERE day = ?
-                GROUP BY bucket
-                ORDER BY seconds DESC
-                """, arguments: [asOf, dayKey])
+                """
+            var args: [DatabaseValueConvertible] = [asOf, dayKey]
+            if let browserBundleID {
+                sql += " AND browserBundleID = ?"
+                args.append(browserBundleID)
+            }
+            sql += " GROUP BY bucket ORDER BY seconds DESC"
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
             return rows.map { row in
                 WebBucketTotal(bucket: row["bucket"], seconds: row["seconds"] ?? 0)
             }

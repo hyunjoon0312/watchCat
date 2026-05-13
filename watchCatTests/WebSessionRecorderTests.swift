@@ -16,12 +16,17 @@ final class WebSessionRecorderTests: XCTestCase {
         func setCurrent(_ info: ActiveAppInfo?) { current = info }
     }
 
-    final class ReaderStub: ChromeTabReading {
-        var nextResult: ChromeTabResult = .chromeNotRunning
+    final class ReaderStub: BrowserTabReading {
+        var nextResult: BrowserTabResult = .browserNotRunning
         var callCount = 0
-        func readActiveTab() -> ChromeTabResult {
+        var lastBrowser: BrowserKind?
+        /// Per-browser overrides — when set, takes precedence over `nextResult`.
+        /// Lets tests model "Chrome returns tab A, Safari returns tab B" in one fixture.
+        var resultByBrowser: [BrowserKind: BrowserTabResult] = [:]
+        func readActiveTab(for browser: BrowserKind) -> BrowserTabResult {
             callCount += 1
-            return nextResult
+            lastBrowser = browser
+            return resultByBrowser[browser] ?? nextResult
         }
     }
 
@@ -29,7 +34,9 @@ final class WebSessionRecorderTests: XCTestCase {
     private func now() -> Date { clockNow }
     private func advance(_ seconds: TimeInterval) { clockNow.addTimeInterval(seconds) }
 
-    private let chrome = ActiveAppInfo(bundleID: ChromeTabReader.chromeBundleID, displayName: "Chrome")
+    private let chrome = ActiveAppInfo(bundleID: BrowserKind.chrome.bundleID, displayName: "Chrome")
+    private let safari = ActiveAppInfo(bundleID: BrowserKind.safari.bundleID, displayName: "Safari")
+    private let whale  = ActiveAppInfo(bundleID: BrowserKind.whale.bundleID, displayName: "Whale")
     private let xcode = ActiveAppInfo(bundleID: "com.apple.dt.Xcode", displayName: "Xcode")
 
     override func setUp() async throws {
@@ -152,5 +159,90 @@ final class WebSessionRecorderTests: XCTestCase {
         recorder.stop()
         XCTAssertEqual(try store.allWebSessions().count, 0)
         XCTAssertEqual(recorder.lastResult, .permissionDenied)
+    }
+
+    // MARK: - Multi-browser (SPEC §F3 multi-browser)
+
+    func test_safari_isPolledLikeChrome() throws {
+        let (store, tracker, reader, recorder) = try makeFixture()
+        tracker.setCurrent(safari)
+        recorder.start()
+        reader.nextResult = .tab(url: "https://apple.com/", title: "Apple", isIncognito: false)
+        recorder.tick()
+        advance(30)
+        recorder.stop()
+
+        let rows = try store.allWebSessions()
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].bucket, "apple.com")
+        XCTAssertEqual(rows[0].browserBundleID, BrowserKind.safari.bundleID,
+                       "session must be tagged with the Safari bundle ID")
+        XCTAssertEqual(reader.lastBrowser, .safari, "reader receives the active browser kind")
+    }
+
+    func test_whale_isPolledLikeChrome() throws {
+        let (store, tracker, reader, recorder) = try makeFixture()
+        tracker.setCurrent(whale)
+        recorder.start()
+        reader.nextResult = .tab(url: "https://naver.com/", title: "NAVER", isIncognito: false)
+        recorder.tick()
+        advance(20)
+        recorder.stop()
+
+        let rows = try store.allWebSessions()
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].browserBundleID, BrowserKind.whale.bundleID)
+        XCTAssertEqual(reader.lastBrowser, .whale)
+    }
+
+    func test_browserSwitch_closesAndReopensRow() throws {
+        let (store, tracker, reader, recorder) = try makeFixture()
+        // Start in Chrome on github.com…
+        tracker.setCurrent(chrome)
+        reader.resultByBrowser[.chrome] = .tab(url: "https://github.com/", title: "GH", isIncognito: false)
+        reader.resultByBrowser[.safari] = .tab(url: "https://apple.com/", title: "A", isIncognito: false)
+        recorder.start()
+        recorder.tick()
+        advance(30)
+        // …switch to Safari. Even if the user had been on github.com in Chrome,
+        // Safari's separate browser should produce its own row.
+        tracker.fire(safari)
+        recorder.tick()
+        advance(45)
+        recorder.stop()
+
+        let rows = try store.allWebSessions().sorted { $0.startAt < $1.startAt }
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].bucket, "github.com")
+        XCTAssertEqual(rows[0].browserBundleID, BrowserKind.chrome.bundleID)
+        XCTAssertEqual(rows[1].bucket, "apple.com")
+        XCTAssertEqual(rows[1].browserBundleID, BrowserKind.safari.bundleID)
+    }
+
+    func test_webDailyTotals_filterByBrowser() throws {
+        let (store, tracker, reader, recorder) = try makeFixture()
+        tracker.setCurrent(chrome)
+        reader.nextResult = .tab(url: "https://github.com/", title: "GH", isIncognito: false)
+        recorder.start()
+        recorder.tick()
+        advance(30)
+        tracker.fire(safari)
+        reader.nextResult = .tab(url: "https://apple.com/", title: "A", isIncognito: false)
+        recorder.tick()
+        advance(20)
+        recorder.stop()
+
+        let allBrowsers = try store.webDailyTotals(for: now())
+        XCTAssertEqual(allBrowsers.count, 2, "unfiltered query returns every browser's rows")
+
+        let chromeOnly = try store.webDailyTotals(for: now(),
+                                                  browserBundleID: BrowserKind.chrome.bundleID)
+        XCTAssertEqual(chromeOnly.count, 1)
+        XCTAssertEqual(chromeOnly[0].bucket, "github.com")
+
+        let safariOnly = try store.webDailyTotals(for: now(),
+                                                  browserBundleID: BrowserKind.safari.bundleID)
+        XCTAssertEqual(safariOnly.count, 1)
+        XCTAssertEqual(safariOnly[0].bucket, "apple.com")
     }
 }

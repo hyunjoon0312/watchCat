@@ -10,7 +10,11 @@ final class PermissionManager: ObservableObject {
     @Published private(set) var states: [PermissionKind: Bool] = [:]
     @Published private(set) var launchAtLoginEnabled: Bool = false
 
-    private let chromeBundleID = "com.google.Chrome"
+    /// SPEC §F3 multi-browser — Apple Events permission is granted *per target
+    /// bundle*. We probe each supported browser; the consolidated state for the
+    /// dashboard is "true if at least one browser is reachable" so users who
+    /// only use Safari aren't nagged about Chrome.
+    private let browserBundleIDs: [String] = BrowserKind.allCases.map(\.bundleID)
     private var activeObserver: NSObjectProtocol?
 
     private init() {
@@ -36,7 +40,7 @@ final class PermissionManager: ObservableObject {
         states = [
             .accessibility: AXIsProcessTrusted(),
             .screenRecording: CGPreflightScreenCaptureAccess(),
-            .appleEvents: checkChromeAutomation(prompt: false)
+            .appleEvents: checkAnyBrowserAutomation(prompt: false)
         ]
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     }
@@ -49,7 +53,10 @@ final class PermissionManager: ObservableObject {
         case .screenRecording:
             _ = CGRequestScreenCaptureAccess()
         case .appleEvents:
-            _ = checkChromeAutomation(prompt: true)
+            // Prompt for every supported browser. macOS only shows a prompt for
+            // browsers that are installed *and* haven't been answered before,
+            // so this is a no-op for missing browsers / already-granted ones.
+            _ = checkAnyBrowserAutomation(prompt: true)
         }
         // System dialogs may take a moment; re-check shortly after.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
@@ -79,8 +86,25 @@ final class PermissionManager: ObservableObject {
         refresh()
     }
 
-    private func checkChromeAutomation(prompt: Bool) -> Bool {
-        let target = NSAppleEventDescriptor(bundleIdentifier: chromeBundleID)
+    /// Probe Apple Events permission across every supported browser. Returns
+    /// `true` if any one of them is reachable — that's enough for watchCat to
+    /// be useful. When `prompt: true`, macOS surfaces the TCC dialog for any
+    /// browser that's installed but unanswered.
+    private func checkAnyBrowserAutomation(prompt: Bool) -> Bool {
+        var anyGranted = false
+        for bundleID in browserBundleIDs {
+            if checkAutomation(target: bundleID, prompt: prompt) {
+                anyGranted = true
+                // Keep iterating only when we're prompting — otherwise we'd
+                // skip remaining browsers' prompts after the first hit.
+                if !prompt { break }
+            }
+        }
+        return anyGranted
+    }
+
+    private func checkAutomation(target bundleID: String, prompt: Bool) -> Bool {
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
         guard let descPtr = target.aeDesc else { return false }
         var desc = descPtr.pointee
         let typeWildCard: DescType = 0x2A2A2A2A  // '****'

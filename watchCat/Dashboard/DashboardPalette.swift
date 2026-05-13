@@ -35,6 +35,35 @@ enum DashboardPalette {
     static let deltaUp   = Color(.displayP3, red: 0.20, green: 0.72, blue: 0.42, opacity: 1)
     static let deltaDown = Color(.displayP3, red: 0.86, green: 0.30, blue: 0.36, opacity: 1)
 
+    /// Diverse jewel-tone series used wherever we need visual variety without
+    /// a semantic mapping — e.g., per-page drill-down rows where each domain
+    /// gets a stable color so users learn to recognize sites at a glance.
+    /// Picked for perceptual balance across hues; saturation and value sit in
+    /// the same band so no single color dominates the row.
+    static let series: [Color] = [
+        Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1),  // indigo
+        Color(.displayP3, red: 0.07, green: 0.66, blue: 0.66, opacity: 1),  // teal
+        Color(.displayP3, red: 0.93, green: 0.42, blue: 0.51, opacity: 1),  // rose
+        Color(.displayP3, red: 0.97, green: 0.69, blue: 0.21, opacity: 1),  // amber
+        Color(.displayP3, red: 0.40, green: 0.74, blue: 0.42, opacity: 1),  // sage
+        Color(.displayP3, red: 0.62, green: 0.45, blue: 0.93, opacity: 1),  // violet
+        Color(.displayP3, red: 0.99, green: 0.55, blue: 0.36, opacity: 1),  // peach
+        Color(.displayP3, red: 0.36, green: 0.62, blue: 0.93, opacity: 1),  // sky
+    ]
+
+    /// Pick a stable color from `series` for an arbitrary key. Uses djb2 to
+    /// distribute keys evenly across the palette — same string maps to the
+    /// same color across renders, so `github.com` is always (say) teal and
+    /// the eye learns to recognize it.
+    static func stableColor(for key: String) -> Color {
+        guard !key.isEmpty else { return series[0] }
+        var hash: UInt64 = 5381
+        for byte in key.utf8 {
+            hash = (hash &* 33) &+ UInt64(byte)
+        }
+        return series[Int(hash % UInt64(series.count))]
+    }
+
     /// Subtle page background — a faint horizontal gradient that adds depth
     /// without competing with the cards.
     static let backgroundGradient = LinearGradient(

@@ -12,6 +12,10 @@ struct DashboardView: View {
     @State private var exporterDocument: TextDocument?
     @State private var showExporter = false
     @State private var defaultExportName = "watchCat-export"
+    /// Bundle IDs of browser rows the user has expanded to see per-page breakdown.
+    /// Multiple browsers can be expanded simultaneously so users can compare
+    /// "what did I read in Chrome vs. Safari today?" side by side.
+    @State private var expandedBrowsers: Set<String> = []
     @Environment(\.colorScheme) private var scheme
 
     init(store: SessionStore?) {
@@ -386,15 +390,30 @@ struct DashboardView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(Array(totals.enumerated()), id: \.element.bundleID) { idx, t in
-                            AppRow(rank: idx + 1, total: t, max: max,
-                                   category: vm.categoryMapping[t.bundleID],
-                                   grandTotal: vm.totalSeconds)
+                            AppRow(
+                                rank: idx + 1, total: t, max: max,
+                                category: vm.categoryMapping[t.bundleID],
+                                grandTotal: vm.totalSeconds,
+                                browser: BrowserKind.from(bundleID: t.bundleID),
+                                browserPages: vm.webByBrowser[t.bundleID] ?? [],
+                                isExpanded: bindingForExpansion(of: t.bundleID)
+                            )
                         }
                     }
                     .padding(.vertical, 6)
                 }
             }
         }
+    }
+
+    private func bindingForExpansion(of bundleID: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedBrowsers.contains(bundleID) },
+            set: { newValue in
+                if newValue { expandedBrowsers.insert(bundleID) }
+                else { expandedBrowsers.remove(bundleID) }
+            }
+        )
     }
 
     private var categoriesTab: some View {
@@ -713,17 +732,67 @@ private struct AppRow: View {
     let max: TimeInterval
     let category: AppCategory?
     let grandTotal: TimeInterval
+    /// Non-nil for known browsers (Chrome / Safari / Whale). Drives the
+    /// disclosure chevron + pointing-hand cursor; non-browser rows render
+    /// identically to the previous version.
+    let browser: BrowserKind?
+    let browserPages: [WebBucketTotal]
+    @Binding var isExpanded: Bool
+
+    @State private var isHovering = false
+    @Environment(\.colorScheme) private var scheme
+
+    /// Cap the drill-down list at this many pages so a Chrome row with 200
+    /// domains doesn't blow up the dashboard height. Anything past this gets
+    /// summarized as "그 외 N개 · …".
+    private static let pageLimit = 10
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            mainRow
+            if isExpanded && browser != nil {
+                pagesSection
+                    .padding(.leading, 38)   // align with the row title (rank gutter)
+                    .padding(.trailing, 10)
+                    .padding(.top, 8).padding(.bottom, 10)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(rowBackground)
+        )
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
+    }
+
+    private var rowBackground: Color {
+        if isExpanded {
+            return DashboardPalette.accentSoft.opacity(scheme == .dark ? 0.45 : 0.55)
+        }
+        if isHovering && browser != nil {
+            return DashboardPalette.accentSoft.opacity(scheme == .dark ? 0.28 : 0.32)
+        }
+        return .clear
+    }
+
+    private var mainRow: some View {
         HStack(spacing: 14) {
-            Text("\(rank)")
-                .font(.dbTagSmall)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .trailing)
+            rankBadge
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
+                    if browser != nil {
+                        // Disclosure indicator only on browser rows. Rotates
+                        // smoothly so the affordance reads as "this is alive".
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(DashboardPalette.accent)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .animation(.easeInOut(duration: 0.18), value: isExpanded)
+                    }
                     Text(total.displayName)
                         .font(.dbHeadline)
                         .lineLimit(1)
@@ -733,6 +802,13 @@ private struct AppRow: View {
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Capsule().fill(DashboardPalette.color(for: c).opacity(0.18)))
                             .foregroundStyle(DashboardPalette.color(for: c))
+                    }
+                    if browser != nil, isExpanded {
+                        Text("\(browserPages.count)개 페이지")
+                            .font(.dbTagSmall)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 1.5)
+                            .background(Capsule().fill(.secondary.opacity(0.12)))
                     }
                     Spacer()
                     Text(TimeFormatting.longHMS(total.seconds))
@@ -749,8 +825,7 @@ private struct AppRow: View {
                         Capsule().fill(.secondary.opacity(0.12))
                         Capsule()
                             .fill(LinearGradient(
-                                colors: [DashboardPalette.accent.opacity(0.85),
-                                         DashboardPalette.accent],
+                                colors: [barColor.opacity(0.78), barColor],
                                 startPoint: .leading, endPoint: .trailing))
                             .frame(width: geo.size.width * fraction)
                     }
@@ -759,15 +834,144 @@ private struct AppRow: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.background.opacity(0.0001))
-        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if browser != nil {
+                isHovering = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+        .onTapGesture {
+            // Only browser rows are tappable; non-browser rows are static info.
+            guard browser != nil else { return }
+            withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+        }
+    }
+
+    @ViewBuilder
+    private var pagesSection: some View {
+        if browserPages.isEmpty {
+            Text("이 기간에 기록된 페이지가 없습니다")
+                .font(.dbCaption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let visiblePages = Array(browserPages.prefix(Self.pageLimit))
+            let leftover = browserPages.dropFirst(Self.pageLimit)
+            let leftoverSeconds = leftover.reduce(0) { $0 + $1.seconds }
+            let pageMax = browserPages.first?.seconds ?? 1
+
+            VStack(spacing: 6) {
+                ForEach(Array(visiblePages.enumerated()), id: \.element.bucket) { _, page in
+                    PageDrillDownRow(page: page, max: pageMax, grandTotal: total.seconds)
+                }
+                if !leftover.isEmpty {
+                    HStack {
+                        Text("그 외 \(leftover.count)개 페이지")
+                            .font(.dbCaption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(TimeFormatting.longHMS(leftoverSeconds))
+                            .font(.dbCaption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
     }
 
     private var fraction: Double {
         guard max > 0 else { return 0 }
         return min(1.0, total.seconds / max)
+    }
+
+    /// Bar color follows the app's category — productivity=indigo, communication=teal,
+    /// entertainment=rose, other=stone, unclassified=accent. Carries useful info
+    /// into the bar itself instead of leaving it a uniform indigo wash.
+    private var barColor: Color {
+        category.map { DashboardPalette.color(for: $0) } ?? DashboardPalette.accent
+    }
+
+    /// Tinted rank pill — gold for the top app, accent for #2/#3, plain for the rest.
+    /// Gives the eye a single attractor when scanning a long list.
+    @ViewBuilder
+    private var rankBadge: some View {
+        if rank == 1 {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(DashboardPalette.highlight))
+        } else if rank <= 3 {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(DashboardPalette.accent)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(DashboardPalette.accentSoft))
+        } else {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
+        }
+    }
+}
+
+/// One page line inside an expanded browser row. Visually lighter than the
+/// main `AppRow` — no rank, smaller progress bar — so it reads as a child
+/// of the parent row rather than a peer in the list.
+private struct PageDrillDownRow: View {
+    let page: WebBucketTotal
+    let max: TimeInterval
+    let grandTotal: TimeInterval
+
+    var body: some View {
+        let tint = DashboardPalette.stableColor(for: page.bucket)
+        HStack(spacing: 10) {
+            // Tinted dot acts as a per-domain swatch — once a user knows
+            // "teal = github", they spot it across sessions without reading.
+            Image(systemName: "circle.fill")
+                .font(.system(size: 7))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(page.bucket)
+                        .font(.dbBody)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(TimeFormatting.longHMS(page.seconds))
+                        .font(.dbBodySmall)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text(TimeFormatting.percent(page.seconds, of: grandTotal))
+                        .font(.dbTagSmall)
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .frame(width: 44, alignment: .trailing)
+                }
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.secondary.opacity(0.10))
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [tint.opacity(0.55), tint],
+                                startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * fraction)
+                    }
+                }
+                .frame(height: 4)
+            }
+        }
+    }
+
+    private var fraction: Double {
+        guard max > 0 else { return 0 }
+        return min(1.0, page.seconds / max)
     }
 }
 
@@ -777,17 +981,14 @@ private struct WebRow: View {
     let max: TimeInterval
 
     var body: some View {
+        let tint = DashboardPalette.stableColor(for: total.bucket)
         HStack(spacing: 14) {
-            Text("\(rank)")
-                .font(.dbTagSmall)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .trailing)
+            rankBadge(rank: rank, tint: tint)
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     Image(systemName: "globe")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DashboardPalette.accent)
+                        .foregroundStyle(tint)
                     Text(total.bucket)
                         .font(.dbHeadline)
                         .lineLimit(1)
@@ -801,8 +1002,7 @@ private struct WebRow: View {
                         Capsule().fill(.secondary.opacity(0.12))
                         Capsule()
                             .fill(LinearGradient(
-                                colors: [DashboardPalette.cellLow,
-                                         DashboardPalette.cellHigh],
+                                colors: [tint.opacity(0.62), tint],
                                 startPoint: .leading, endPoint: .trailing))
                             .frame(width: geo.size.width * fraction)
                     }
@@ -811,6 +1011,33 @@ private struct WebRow: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
+    }
+
+    /// Gold for #1, tinted soft pill for #2/#3, plain for the rest. Matches
+    /// the app-row rank styling so the two tabs feel coherent.
+    @ViewBuilder
+    private func rankBadge(rank: Int, tint: Color) -> some View {
+        if rank == 1 {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(DashboardPalette.highlight))
+        } else if rank <= 3 {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(tint.opacity(0.18)))
+        } else {
+            Text("\(rank)")
+                .font(.dbTagSmall)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
+        }
     }
 
     private var fraction: Double {

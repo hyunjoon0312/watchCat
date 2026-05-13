@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeAppTracker: ActiveAppTracker?
     private var sessionRecorder: SessionRecorder?
     private var webSessionRecorder: WebSessionRecorder?
-    private var chromeTabReader: ChromeTabReader?
+    private var browserTabReader: BrowserTabReader?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Skip app startup when launched as the XCTest host — otherwise onboarding
@@ -47,8 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let store = sessionStore {
             let tracker = ActiveAppTracker()
             activeAppTracker = tracker
-            let reader = ChromeTabReader()
-            chromeTabReader = reader
+            let reader = BrowserTabReader()
+            browserTabReader = reader
 
             // Both recorders register listeners on the tracker. Web recorder must
             // attach its listener before SessionRecorder.start() runs the initial

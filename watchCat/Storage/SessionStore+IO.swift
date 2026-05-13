@@ -32,6 +32,9 @@ struct WatchCatArchive: Codable, Equatable {
         var url: String?
         var title: String?
         var isIncognito: Bool
+        /// Source browser bundle ID. Optional on decode so v1 archives (no
+        /// browser column) still import — missing values fall back to Chrome.
+        var browserBundleID: String?
         var day: String
     }
 
@@ -87,14 +90,16 @@ extension SessionStore {
                 )
             }
             let web = try Row.fetchAll(db, sql: """
-                SELECT startAt, endAt, bucket, url, title, isIncognito, day
+                SELECT startAt, endAt, bucket, url, title, isIncognito, browserBundleID, day
                 FROM \(WebSessionRecord.databaseTableName)
                 ORDER BY startAt ASC
                 """).map { r in
                 WatchCatArchive.WebSession(
                     startAt: r["startAt"], endAt: r["endAt"],
                     bucket: r["bucket"], url: r["url"], title: r["title"],
-                    isIncognito: r["isIncognito"], day: r["day"]
+                    isIncognito: r["isIncognito"],
+                    browserBundleID: r["browserBundleID"],
+                    day: r["day"]
                 )
             }
             let cats = try Row.fetchAll(db, sql: """
@@ -166,10 +171,12 @@ extension SessionStore {
             for w in archive.webSessions {
                 try db.execute(sql: """
                     INSERT INTO \(WebSessionRecord.databaseTableName)
-                        (startAt, endAt, bucket, url, title, isIncognito, day)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (startAt, endAt, bucket, url, title, isIncognito, browserBundleID, day)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [w.startAt, w.endAt, w.bucket, w.url, w.title,
-                                     w.isIncognito, w.day])
+                                     w.isIncognito,
+                                     w.browserBundleID ?? BrowserKind.chrome.bundleID,
+                                     w.day])
             }
             // Categories: ON CONFLICT keeps merge idempotent — re-importing the
             // same archive twice doesn't error or duplicate, it just overwrites.

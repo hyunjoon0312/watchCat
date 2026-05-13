@@ -11,7 +11,7 @@ enum PermissionKind: String, CaseIterable, Identifiable {
         switch self {
         case .accessibility: return "접근성"
         case .screenRecording: return "화면 기록"
-        case .appleEvents: return "Chrome 자동화"
+        case .appleEvents: return "브라우저 자동화"
         }
     }
 
@@ -22,7 +22,7 @@ enum PermissionKind: String, CaseIterable, Identifiable {
         case .screenRecording:
             return "활성 창 정보를 정확히 얻기 위해 필요합니다."
         case .appleEvents:
-            return "Chrome의 활성 탭(도메인)을 읽기 위해 필요합니다."
+            return "Chrome / Safari / NAVER Whale의 활성 탭(도메인)을 읽기 위해 필요합니다."
         }
     }
 

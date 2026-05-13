@@ -15,6 +15,10 @@ struct WebSessionRecord: Codable, FetchableRecord, MutablePersistableRecord, Equ
     var url: String?          // raw URL for drill-down; nil under incognito-bucket
     var title: String?
     var isIncognito: Bool
+    /// SPEC §F3 multi-browser — source browser's bundle ID (Chrome / Safari /
+    /// Whale). Lets the status menu and analytics queries attribute web
+    /// sessions back to the specific browser the user was in.
+    var browserBundleID: String
     var day: String
 
     enum Columns {
@@ -25,6 +29,7 @@ struct WebSessionRecord: Codable, FetchableRecord, MutablePersistableRecord, Equ
         static let url = Column("url")
         static let title = Column("title")
         static let isIncognito = Column("isIncognito")
+        static let browserBundleID = Column("browserBundleID")
         static let day = Column("day")
     }
 

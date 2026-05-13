@@ -1,8 +1,9 @@
 import Foundation
 import Combine
 
-/// SPEC §F3.2 — while Chrome is the active app and recording is live, poll the
-/// active tab and persist one row per (bucket, contiguous span).
+/// SPEC §F3 — while a known browser (Chrome / Safari / Whale) is the active app
+/// and recording is live, poll its active tab and persist one row per
+/// (bucket, contiguous span) tagged with the source browser.
 ///
 /// The recorder is intentionally passive about app/state changes — it observes
 /// `ActiveAppTracker.onChange` (already wired by `SessionRecorder`) and the
@@ -15,7 +16,7 @@ final class WebSessionRecorder {
     private let store: SessionStore
     private let tracker: ActiveAppTracker
     private let state: RecordingStateController
-    private let reader: ChromeTabReading
+    private let reader: BrowserTabReading
     private let clock: () -> Date
 
     private var pollTimer: Timer?
@@ -23,19 +24,29 @@ final class WebSessionRecorder {
 
     private var openSessionID: Int64?
     private var openBucket: String?
+    private var openBrowser: BrowserKind?
 
-    /// Currently-open Chrome bucket — `nil` whenever no web session is open
-    /// (Chrome not active, paused, incognito-collapsed without permission, etc.).
+    /// Browser the recorder is currently polling. Recomputed from the tracker's
+    /// frontmost app on every activation / state change.
+    private var activeBrowser: BrowserKind?
+
+    /// Currently-open browser bucket — `nil` whenever no web session is open
+    /// (no browser active, paused, incognito-collapsed without permission, etc.).
     /// Published so the status bar can mirror the active page label live.
     @Published private(set) var currentBucket: String?
+
+    /// Browser the currently-published `currentBucket` belongs to. Lets the
+    /// status line display "기록 중 · Safari / github.com" instead of always
+    /// saying "Chrome".
+    @Published private(set) var currentBrowser: BrowserKind?
 
     /// Most recent tab-read outcome. `@Published` so the status bar can surface
     /// a permission-denied banner the moment AppleScript starts failing — without
     /// the user having to wait for the next menu open to find out.
-    @Published private(set) var lastResult: ChromeTabResult?
+    @Published private(set) var lastResult: BrowserTabResult?
 
     init(store: SessionStore, tracker: ActiveAppTracker, state: RecordingStateController,
-         reader: ChromeTabReading, clock: @escaping () -> Date = Date.init) {
+         reader: BrowserTabReading, clock: @escaping () -> Date = Date.init) {
         self.store = store
         self.tracker = tracker
         self.state = state
@@ -77,10 +88,11 @@ final class WebSessionRecorder {
     }
 
     private func evaluatePolling() {
-        let chromeActive = tracker.current?.bundleID == ChromeTabReader.chromeBundleID
+        let browser = BrowserKind.from(bundleID: tracker.current?.bundleID)
+        activeBrowser = browser
         let recording: Bool
         if case .recording = state.state { recording = true } else { recording = false }
-        if chromeActive && recording {
+        if browser != nil && recording {
             startPolling()
         } else {
             stopPolling()
@@ -104,11 +116,15 @@ final class WebSessionRecorder {
 
     /// Exposed for tests — calls a single tab read + session reconciliation.
     func tick() {
-        let result = reader.readActiveTab()
+        guard let browser = activeBrowser else {
+            // Defensive: tick fired but no browser tracked (race with deactivation).
+            return
+        }
+        let result = reader.readActiveTab(for: browser)
         lastResult = result
         let now = clock()
         switch result {
-        case .chromeNotRunning, .noActiveTab, .permissionDenied, .failure:
+        case .browserNotRunning, .noActiveTab, .permissionDenied, .failure:
             // Lose visibility into the tab → close any open session. We don't open
             // anything until we can read a real bucket again. Permission-denied is
             // surfaced through `lastResult` for the status bar menu.
@@ -120,14 +136,18 @@ final class WebSessionRecorder {
                 closeOpenSession(at: now)
                 return
             }
-            if bucket == openBucket { return }
+            // Same bucket *and* same browser → no-op. Switching browsers while
+            // staying on the same domain still rolls over so attribution stays
+            // correct in the per-browser status-menu drill-down.
+            if bucket == openBucket && browser == openBrowser { return }
             closeOpenSession(at: now)
-            openSession(bucket: bucket, url: url, title: title, isIncognito: isIncognito, at: now)
+            openSession(bucket: bucket, url: url, title: title,
+                        isIncognito: isIncognito, browser: browser, at: now)
         }
     }
 
     private func openSession(bucket: String, url: String, title: String,
-                             isIncognito: Bool, at start: Date) {
+                             isIncognito: Bool, browser: BrowserKind, at start: Date) {
         let unit = WebRecordUnit.current()
         let storedURL = (unit != .domain) || isIncognito ? nil : url
         let storedTitle = (unit == .title) ? title : nil
@@ -136,15 +156,20 @@ final class WebSessionRecorder {
                 at: start, bucket: bucket,
                 url: storedURL.flatMap { WebRecordOptions.stripQuery ? URLUtilities.stripQuery(from: $0) : $0 },
                 title: storedTitle,
-                isIncognito: isIncognito
+                isIncognito: isIncognito,
+                browserBundleID: browser.bundleID
             )
             openBucket = bucket
+            openBrowser = browser
             currentBucket = bucket
+            currentBrowser = browser
         } catch {
             NSLog("[watchCat] startWebSession failed: \(error.localizedDescription)")
             openSessionID = nil
             openBucket = nil
+            openBrowser = nil
             currentBucket = nil
+            currentBrowser = nil
         }
     }
 
@@ -157,6 +182,8 @@ final class WebSessionRecorder {
         }
         openSessionID = nil
         openBucket = nil
+        openBrowser = nil
         currentBucket = nil
+        currentBrowser = nil
     }
 }
