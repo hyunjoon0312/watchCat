@@ -58,7 +58,7 @@ struct DashboardView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-        .frame(minWidth: 980, minHeight: 700)
+        .frame(minWidth: 1140, minHeight: 700)
         .fileExporter(
             isPresented: $showExporter,
             document: exporterDocument,
@@ -89,7 +89,7 @@ struct DashboardView: View {
                 circleButton(systemImage: "chevron.left") { vm.step(by: -1) }
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 periodDateControl
-                    .frame(minWidth: 200)
+                    .fixedSize(horizontal: true, vertical: false)
                 circleButton(systemImage: "chevron.right") { vm.step(by: 1) }
                     .keyboardShortcut(.rightArrow, modifiers: [])
                 // Render as an HStack-wrapped Text chip with onTapGesture. The

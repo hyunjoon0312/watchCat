@@ -25,8 +25,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         w.titlebarAppearsTransparent = true
         // Initial size comfortable for every period; minSize prevents content
         // from clipping when the user shrinks the window after a period swap.
-        w.setContentSize(NSSize(width: 1120, height: 820))
-        w.contentMinSize = NSSize(width: 980, height: 700)
+        w.setContentSize(NSSize(width: 1200, height: 820))
+        w.contentMinSize = NSSize(width: 1140, height: 700)
         w.center()
         w.isReleasedWhenClosed = false
         w.delegate = self
