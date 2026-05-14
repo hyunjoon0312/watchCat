@@ -396,7 +396,10 @@ struct DashboardView: View {
                                 grandTotal: vm.totalSeconds,
                                 browser: BrowserKind.from(bundleID: t.bundleID),
                                 browserPages: vm.webByBrowser[t.bundleID] ?? [],
-                                isExpanded: bindingForExpansion(of: t.bundleID)
+                                isExpanded: bindingForExpansion(of: t.bundleID),
+                                onCategoryChange: { cat in
+                                    vm.updateCategory(cat, for: t.bundleID)
+                                }
                             )
                         }
                     }
@@ -738,6 +741,7 @@ private struct AppRow: View {
     let browser: BrowserKind?
     let browserPages: [WebBucketTotal]
     @Binding var isExpanded: Bool
+    let onCategoryChange: (AppCategory?) -> Void
 
     @State private var isHovering = false
     @Environment(\.colorScheme) private var scheme
@@ -796,13 +800,7 @@ private struct AppRow: View {
                     Text(total.displayName)
                         .font(.dbHeadline)
                         .lineLimit(1)
-                    if let c = category {
-                        Text(c.displayName)
-                            .font(.dbTagSmall)
-                            .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Capsule().fill(DashboardPalette.color(for: c).opacity(0.18)))
-                            .foregroundStyle(DashboardPalette.color(for: c))
-                    }
+                    categoryPicker
                     if browser != nil, isExpanded {
                         Text("\(browserPages.count)개 페이지")
                             .font(.dbTagSmall)
@@ -846,6 +844,51 @@ private struct AppRow: View {
             guard browser != nil else { return }
             withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
         }
+    }
+
+    /// Inline category picker. Renders the existing colored chip when a
+    /// category is set, or a muted "분류" pill when unset. Either form opens
+    /// a Menu that lets the user pick / clear the category — the change is
+    /// persisted via `onCategoryChange`.
+    private var categoryPicker: some View {
+        Menu {
+            ForEach(AppCategory.allCases, id: \.self) { cat in
+                Button {
+                    onCategoryChange(cat)
+                } label: {
+                    if category == cat {
+                        Label(cat.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(cat.displayName)
+                    }
+                }
+            }
+            if category != nil {
+                Divider()
+                Button("분류 해제", role: .destructive) { onCategoryChange(nil) }
+            }
+        } label: {
+            if let c = category {
+                Text(c.displayName)
+                    .font(.dbTagSmall)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Capsule().fill(DashboardPalette.color(for: c).opacity(0.18)))
+                    .foregroundStyle(DashboardPalette.color(for: c))
+            } else {
+                HStack(spacing: 3) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("분류")
+                        .font(.dbTagSmall)
+                }
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(.secondary.opacity(0.14)))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     @ViewBuilder

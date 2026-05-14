@@ -211,6 +211,23 @@ final class DashboardViewModel: ObservableObject {
         return (diff, diff / previousTotalSeconds * 100.0)
     }
 
+    /// Persist a user-picked category for an app. Passing `nil` clears it.
+    /// Triggers a `reload()` so the dashboard's category aggregates reflect
+    /// the change immediately — the categorization joins live at read-time.
+    func updateCategory(_ category: AppCategory?, for bundleID: String) {
+        guard let store else { return }
+        do {
+            if let category {
+                try store.setCategory(category, forBundleID: bundleID)
+            } else {
+                try store.clearCategory(forBundleID: bundleID)
+            }
+            reload()
+        } catch {
+            self.loadError = "카테고리 저장 실패: \(error.localizedDescription)"
+        }
+    }
+
     /// Short label for the "previous period" chip — "어제", "지난 주", "지난 달", "이전 기간".
     var previousPeriodName: String {
         switch period {
