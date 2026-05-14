@@ -291,46 +291,74 @@ private struct DayTimeline: View {
     let intervals: [(start: Double, end: Double)]
     @Environment(\.colorScheme) private var scheme
 
+    /// Hours marked under the bar. 3-hour grid (0, 3, 6, …, 24) — fine enough
+    /// to read the morning/afternoon split, coarse enough that labels don't
+    /// crowd at popover width (360pt).
+    private static let tickHours = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    // Rest background — single capsule, the active rectangles
-                    // mask sit on top so the visible "rest" portions are
-                    // whatever the active bars don't cover.
+                    // Rest background — a warm-tinted neutral so the visible
+                    // "rest" portions read as a distinct color rather than a
+                    // washed-out version of the surrounding surface.
                     Capsule()
-                        .fill(.secondary.opacity(scheme == .dark ? 0.22 : 0.16))
+                        .fill(restColor)
+
+                    // 3-hour gridlines drawn faintly across the bar.
+                    ForEach(Self.tickHours.dropFirst().dropLast(), id: \.self) { h in
+                        Rectangle()
+                            .fill(.primary.opacity(scheme == .dark ? 0.18 : 0.12))
+                            .frame(width: 1)
+                            .offset(x: geo.size.width * Double(h) / 24.0)
+                    }
 
                     ForEach(intervals.indices, id: \.self) { idx in
                         let iv = intervals[idx]
                         let width = max(2, geo.size.width * (iv.end - iv.start))
                         Capsule()
-                            .fill(accent)
+                            .fill(
+                                LinearGradient(
+                                    colors: [activeStart, activeEnd],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
                             .frame(width: width)
                             .offset(x: geo.size.width * iv.start)
                     }
 
                     // "Now" tick.
                     Rectangle()
-                        .fill(.primary.opacity(0.7))
+                        .fill(.primary.opacity(0.85))
                         .frame(width: 1.5)
                         .offset(x: geo.size.width * nowFraction)
                 }
             }
             .frame(height: 10)
 
-            HStack(spacing: 0) {
-                tickLabel("0")
-                Spacer()
-                tickLabel("6")
-                Spacer()
-                tickLabel("12")
-                Spacer()
-                tickLabel("18")
-                Spacer()
-                tickLabel("24")
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    ForEach(Self.tickHours, id: \.self) { h in
+                        tickLabel("\(h)")
+                            .offset(x: tickX(for: h, totalWidth: geo.size.width, label: "\(h)"))
+                    }
+                }
             }
+            .frame(height: 12)
         }
+    }
+
+    /// Compute the X offset for a tick label so its center sits on the
+    /// gridline. 0 sticks to the left edge, 24 to the right edge, every other
+    /// label centers on its line.
+    private func tickX(for hour: Int, totalWidth: CGFloat, label: String) -> CGFloat {
+        let frac = CGFloat(hour) / 24.0
+        let approxWidth: CGFloat = label.count <= 1 ? 6 : 12
+        let centered = totalWidth * frac - approxWidth / 2
+        if hour == 0 { return 0 }
+        if hour == 24 { return totalWidth - approxWidth }
+        return centered
     }
 
     private func tickLabel(_ text: String) -> some View {
@@ -340,8 +368,21 @@ private struct DayTimeline: View {
             .foregroundStyle(.secondary)
     }
 
-    private var accent: Color {
-        Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
+    /// Active = vivid indigo with a slight gradient so wider blocks have
+    /// visual interest without losing the brand color.
+    private var activeStart: Color {
+        Color(.displayP3, red: 0.49, green: 0.42, blue: 0.99, opacity: 1)
+    }
+    private var activeEnd: Color {
+        Color(.displayP3, red: 0.37, green: 0.30, blue: 0.92, opacity: 1)
+    }
+
+    /// Rest = a warm sand/charcoal tint that contrasts with the indigo active
+    /// and reads as "different from background" in both light and dark mode.
+    private var restColor: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.32, green: 0.30, blue: 0.36, opacity: 1)
+            : Color(.displayP3, red: 0.86, green: 0.84, blue: 0.88, opacity: 1)
     }
 
     private var nowFraction: Double {
