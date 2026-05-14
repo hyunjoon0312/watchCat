@@ -347,6 +347,21 @@ final class SessionStore {
         }
     }
 
+    /// Persists a new ordering. `ids` is expected to contain every category
+    /// in the desired order; any category not in the list keeps its current
+    /// sortOrder (defensive against the UI passing a partial list during a
+    /// concurrent edit). All rewrites happen in one transaction.
+    func reorderCategories(ids: [String]) throws {
+        try dbQueue.write { db in
+            for (idx, id) in ids.enumerated() {
+                try db.execute(sql: """
+                    UPDATE \(AppCategoryDefinitionRecord.databaseTableName)
+                    SET sortOrder = ? WHERE id = ?
+                    """, arguments: [idx, id])
+            }
+        }
+    }
+
     /// Deletes a category definition. Apps mapped to it become unclassified
     /// (their `app_categories` rows are removed in the same transaction).
     func deleteCategoryDefinition(id: String) throws {

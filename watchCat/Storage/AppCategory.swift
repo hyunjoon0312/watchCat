@@ -29,16 +29,18 @@ struct AppCategory: Identifiable, Equatable, Hashable {
     /// Fixed swatch palette the picker offers — chosen for perceptual balance
     /// against the dashboard's surfaces. Users pick from these instead of a
     /// freeform color well to keep the donut chart legible.
+    /// 6 columns × 4 rows. Rows progress roughly from cool → warm; each row
+    /// mixes a saturated and a softer variant so users have shading options
+    /// within a hue.
     static let palette: [String] = [
-        "#6E5CF5", // indigo
-        "#12A8A8", // teal
-        "#ED6B82", // rose
-        "#F7B036", // amber
-        "#67BD6B", // sage
-        "#9F73EE", // violet
-        "#FC8C5C", // peach
-        "#5C9EEE", // sky
-        "#8C8E9E", // slate
+        // Row 1 — blues / indigos
+        "#5C9EEE", "#4F7CE6", "#6E5CF5", "#9F73EE", "#B85FE0", "#7A52B3",
+        // Row 2 — teals / greens
+        "#12A8A8", "#1FB7C2", "#3CC29A", "#67BD6B", "#4E9A52", "#A8C940",
+        // Row 3 — yellows / oranges / reds
+        "#F1D045", "#F7B036", "#FC8C5C", "#F26B43", "#ED6B82", "#D9425C",
+        // Row 4 — pinks / browns / neutrals
+        "#F08AB6", "#C0744E", "#8D6243", "#6F6A86", "#8C8E9E", "#444859",
     ]
 }
 

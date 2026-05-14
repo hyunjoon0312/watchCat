@@ -468,7 +468,8 @@ struct DashboardView: View {
                 categories: vm.categories,
                 onAdd: { name, hex in vm.addCategory(name: name, colorHex: hex) },
                 onRename: { id, name, hex in vm.renameCategory(id: id, name: name, colorHex: hex) },
-                onDelete: { id in vm.deleteCategory(id: id) }
+                onDelete: { id in vm.deleteCategory(id: id) },
+                onReorder: { ids in vm.reorderCategories(ids: ids) }
             )
         }
     }
@@ -1148,8 +1149,14 @@ private struct CategoryManagementSection: View {
     let onAdd: (String, String) -> Void
     let onRename: (String, String, String) -> Void
     let onDelete: (String) -> Void
+    let onReorder: ([String]) -> Void
 
     @State private var showingAddSheet = false
+    /// Local in-flight order while a drag is happening. Synced from `categories`
+    /// in `.onChange` so external edits (add/rename/delete via reload) flow in
+    /// without stomping a drag in progress.
+    @State private var workingOrder: [AppCategory] = []
+    @State private var draggingID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1177,24 +1184,41 @@ private struct CategoryManagementSection: View {
                 .pointingCursor()
             }
 
-            if categories.isEmpty {
+            if workingOrder.isEmpty {
                 Text("아직 추가된 카테고리가 없습니다")
                     .font(.dbBody)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(categories) { cat in
+                    ForEach(workingOrder) { cat in
                         CategoryEditRow(
                             category: cat,
+                            isDragging: draggingID == cat.id,
                             onRename: { newName, newHex in
                                 onRename(cat.id, newName, newHex)
                             },
                             onDelete: { onDelete(cat.id) }
                         )
+                        .onDrag {
+                            draggingID = cat.id
+                            return NSItemProvider(object: cat.id as NSString)
+                        }
+                        .onDrop(of: [.text], delegate: CategoryDropDelegate(
+                            target: cat,
+                            workingOrder: $workingOrder,
+                            draggingID: $draggingID,
+                            commit: { ids in onReorder(ids) }
+                        ))
                     }
                 }
             }
+        }
+        .onAppear { workingOrder = categories }
+        .onChange(of: categories) { newValue in
+            // Only sync if not actively dragging — otherwise the reorder would
+            // snap back to the server order mid-gesture.
+            if draggingID == nil { workingOrder = newValue }
         }
         .sheet(isPresented: $showingAddSheet) {
             CategoryAddSheet(
@@ -1208,8 +1232,43 @@ private struct CategoryManagementSection: View {
     }
 }
 
+/// Reorders `workingOrder` when a row is dragged over another row. Commits
+/// the final order to the store on drop completion via `commit`. SwiftUI's
+/// `.draggable` / `.dropDestination` API would be cleaner but it's iOS17+;
+/// `.onDrag` + DropDelegate works on macOS 14.
+private struct CategoryDropDelegate: DropDelegate {
+    let target: AppCategory
+    @Binding var workingOrder: [AppCategory]
+    @Binding var draggingID: String?
+    let commit: ([String]) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let sourceID = draggingID, sourceID != target.id,
+              let from = workingOrder.firstIndex(where: { $0.id == sourceID }),
+              let to = workingOrder.firstIndex(where: { $0.id == target.id })
+        else { return }
+        if workingOrder[to].id != sourceID {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                workingOrder.move(fromOffsets: IndexSet(integer: from),
+                                  toOffset: to > from ? to + 1 : to)
+            }
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        commit(workingOrder.map { $0.id })
+        draggingID = nil
+        return true
+    }
+}
+
 private struct CategoryEditRow: View {
     let category: AppCategory
+    let isDragging: Bool
     let onRename: (String, String) -> Void
     let onDelete: () -> Void
 
@@ -1220,9 +1279,11 @@ private struct CategoryEditRow: View {
     @FocusState private var nameFocused: Bool
     @Environment(\.colorScheme) private var scheme
 
-    init(category: AppCategory, onRename: @escaping (String, String) -> Void,
+    init(category: AppCategory, isDragging: Bool,
+         onRename: @escaping (String, String) -> Void,
          onDelete: @escaping () -> Void) {
         self.category = category
+        self.isDragging = isDragging
         self.onRename = onRename
         self.onDelete = onDelete
         _nameDraft = State(initialValue: category.name)
@@ -1231,6 +1292,12 @@ private struct CategoryEditRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+                .help("드래그해서 순서 변경")
+
             Button {
                 showingColorPicker = true
             } label: {
@@ -1283,6 +1350,7 @@ private struct CategoryEditRow: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.background.opacity(scheme == .dark ? 0.45 : 0.6))
         )
+        .opacity(isDragging ? 0.4 : 1.0)
         .alert("'\(category.name)' 카테고리를 삭제할까요?", isPresented: $showingDeleteAlert) {
             Button("취소", role: .cancel) {}
             Button("삭제", role: .destructive) { onDelete() }
@@ -1356,7 +1424,7 @@ private struct ColorPaletteGrid: View {
     let onPick: (String) -> Void
 
     var body: some View {
-        let columns = Array(repeating: GridItem(.fixed(30), spacing: 8), count: 5)
+        let columns = Array(repeating: GridItem(.fixed(30), spacing: 8), count: 6)
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(AppCategory.palette, id: \.self) { hex in
                 Button {

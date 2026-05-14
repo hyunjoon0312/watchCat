@@ -258,6 +258,16 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    func reorderCategories(ids: [String]) {
+        guard let store else { return }
+        do {
+            try store.reorderCategories(ids: ids)
+            reload()
+        } catch {
+            self.loadError = "카테고리 순서 변경 실패: \(error.localizedDescription)"
+        }
+    }
+
     func deleteCategory(id: String) {
         guard let store else { return }
         do {
