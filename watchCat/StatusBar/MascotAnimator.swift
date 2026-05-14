@@ -11,6 +11,8 @@ final class MascotAnimator {
     private var reduceMotion: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private var reduceMotionObserver: NSObjectProtocol?
 
+    /// Unprefixed frame names — combined with `MascotKind.current.rawValue` at
+    /// asset-lookup time so a single source of truth picks the right species.
     private static let recordFrames = [
         "record-1-left", "record-2-front", "record-3-right", "record-4-front", "record-5-blink"
     ]
@@ -18,9 +20,12 @@ final class MascotAnimator {
     private static let staticRecording = "record-2-front"
     private static let staticPaused = "pause-2"
 
+    private var mascotKindObserver: NSObjectProtocol?
+
     init(button: NSStatusBarButton) {
         self.statusButton = button
         observeReduceMotion()
+        observeMascotKindChange()
         applyCurrentFrame()
         scheduleTimer()
     }
@@ -29,6 +34,23 @@ final class MascotAnimator {
         timer?.invalidate()
         if let obs = reduceMotionObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(obs)
+        }
+        if let obs = mascotKindObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+    }
+
+    /// Switch to the user's selected mascot the instant Settings posts a change.
+    /// Frame index resets so the new species starts from its first pose instead
+    /// of mid-blink, which would otherwise read as a glitch.
+    private func observeMascotKindChange() {
+        mascotKindObserver = NotificationCenter.default.addObserver(
+            forName: .mascotKindDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.frameIndex = 0
+                self?.applyCurrentFrame()
+            }
         }
     }
 
@@ -93,8 +115,10 @@ final class MascotAnimator {
 
     private func applyCurrentFrame() {
         guard let button = statusButton else { return }
-        let name = reduceMotion ? staticFrame : frames[frameIndex]
-        guard let image = NSImage(named: name) else {
+        let unprefixed = reduceMotion ? staticFrame : frames[frameIndex]
+        let kind = MascotKind.current
+        let assetName = "\(kind.rawValue)-\(unprefixed)"
+        guard let image = NSImage(named: assetName) else {
             // Asset missing — fall back to text placeholder so we notice during dev.
             button.image = nil
             button.title = "🐱"
