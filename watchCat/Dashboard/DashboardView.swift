@@ -193,7 +193,7 @@ struct DashboardView: View {
         case .range:
             HStack(spacing: 6) {
                 DateChip(label: shortDate(vm.rangeStart), selection: $vm.rangeStart)
-                Text("→").foregroundStyle(.secondary).font(.system(size: 12, weight: .bold))
+                Text("~").foregroundStyle(.secondary).font(.system(size: 13, weight: .bold))
                 DateChip(label: shortDate(vm.rangeEnd), selection: $vm.rangeEnd)
             }
         }
@@ -252,7 +252,7 @@ struct DashboardView: View {
                                 Circle()
                                     .fill(DashboardPalette.color(for: ct.category))
                                     .frame(width: 9, height: 9)
-                                Text(ct.category?.displayName ?? "미분류")
+                                Text(ct.category?.name ?? "미분류")
                                     .font(.dbBody)
                                 Spacer()
                                 Text(TimeFormatting.percent(ct.seconds, of: vm.totalSeconds))
@@ -399,7 +399,8 @@ struct DashboardView: View {
                                 isExpanded: bindingForExpansion(of: t.bundleID),
                                 onCategoryChange: { cat in
                                     vm.updateCategory(cat, for: t.bundleID)
-                                }
+                                },
+                                allCategories: vm.categories
                             )
                         }
                     }
@@ -420,7 +421,7 @@ struct DashboardView: View {
     }
 
     private var categoriesTab: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 22) {
             if vm.categoryTotals.isEmpty || vm.totalSeconds == 0 {
                 emptyState(message: "이 기간에 기록된 데이터가 없습니다", icon: "circle.dashed")
             } else {
@@ -443,7 +444,7 @@ struct DashboardView: View {
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(DashboardPalette.color(for: ct.category))
                                     .frame(width: 12, height: 12)
-                                Text(ct.category?.displayName ?? "미분류")
+                                Text(ct.category?.name ?? "미분류")
                                     .font(.dbHeadline)
                                 Spacer()
                                 Text(TimeFormatting.longHMS(ct.seconds))
@@ -461,7 +462,14 @@ struct DashboardView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, 10)
+                Divider().opacity(0.4)
             }
+            CategoryManagementSection(
+                categories: vm.categories,
+                onAdd: { name, hex in vm.addCategory(name: name, colorHex: hex) },
+                onRename: { id, name, hex in vm.renameCategory(id: id, name: name, colorHex: hex) },
+                onDelete: { id in vm.deleteCategory(id: id) }
+            )
         }
     }
 
@@ -520,7 +528,7 @@ struct DashboardView: View {
         f.dateFormat = "yyyy.MM.dd"
         let endShort = DateFormatter(); endShort.locale = Locale(identifier: "ko_KR")
         endShort.dateFormat = "MM.dd"
-        return "\(f.string(from: r.start)) — \(endShort.string(from: r.end))"
+        return "\(f.string(from: r.start)) ~ \(endShort.string(from: r.end))"
     }
     private func shortDate(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR")
@@ -744,6 +752,10 @@ private struct AppRow: View {
     let browserPages: [WebBucketTotal]
     @Binding var isExpanded: Bool
     let onCategoryChange: (AppCategory?) -> Void
+    /// Full list of user-defined categories shown in the picker menu. Passed
+    /// in by the parent (DashboardView) so AppRow doesn't need to reach into
+    /// the view model directly.
+    let allCategories: [AppCategory]
 
     @State private var isHovering = false
     @Environment(\.colorScheme) private var scheme
@@ -854,14 +866,18 @@ private struct AppRow: View {
     /// persisted via `onCategoryChange`.
     private var categoryPicker: some View {
         Menu {
-            ForEach(AppCategory.allCases, id: \.self) { cat in
-                Button {
-                    onCategoryChange(cat)
-                } label: {
-                    if category == cat {
-                        Label(cat.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(cat.displayName)
+            if allCategories.isEmpty {
+                Text("카테고리가 없습니다")
+            } else {
+                ForEach(allCategories) { cat in
+                    Button {
+                        onCategoryChange(cat)
+                    } label: {
+                        if category?.id == cat.id {
+                            Label(cat.name, systemImage: "checkmark")
+                        } else {
+                            Text(cat.name)
+                        }
                     }
                 }
             }
@@ -871,7 +887,7 @@ private struct AppRow: View {
             }
         } label: {
             if let c = category {
-                Text(c.displayName)
+                Text(c.name)
                     .font(.dbTagSmall)
                     .padding(.horizontal, 8).padding(.vertical, 2)
                     .background(Capsule().fill(DashboardPalette.color(for: c).opacity(0.18)))
@@ -1117,5 +1133,259 @@ struct TextDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
+// MARK: - Category management (inline editor on the category tab)
+
+/// Inline CRUD UI for user-editable categories. Lives at the bottom of the
+/// category tab so users can rename / recolor / delete categories or add new
+/// ones without leaving the dashboard. Edits commit on focus-out or Enter;
+/// deletes prompt for confirmation (an app mapped to the category becomes
+/// unclassified, which is irreversible without re-tagging).
+private struct CategoryManagementSection: View {
+    let categories: [AppCategory]
+    let onAdd: (String, String) -> Void
+    let onRename: (String, String, String) -> Void
+    let onDelete: (String) -> Void
+
+    @State private var showingAddSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("카테고리 관리")
+                    .font(.dbCardTitle)
+                    .tracking(DashboardTracking.label)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("카테고리 추가").font(.dbTag)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Capsule().fill(DashboardPalette.accent))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .pointingCursor()
+            }
+
+            if categories.isEmpty {
+                Text("아직 추가된 카테고리가 없습니다")
+                    .font(.dbBody)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(categories) { cat in
+                        CategoryEditRow(
+                            category: cat,
+                            onRename: { newName, newHex in
+                                onRename(cat.id, newName, newHex)
+                            },
+                            onDelete: { onDelete(cat.id) }
+                        )
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddSheet) {
+            CategoryAddSheet(
+                onSave: { name, hex in
+                    onAdd(name, hex)
+                    showingAddSheet = false
+                },
+                onCancel: { showingAddSheet = false }
+            )
+        }
+    }
+}
+
+private struct CategoryEditRow: View {
+    let category: AppCategory
+    let onRename: (String, String) -> Void
+    let onDelete: () -> Void
+
+    @State private var nameDraft: String
+    @State private var hexDraft: String
+    @State private var showingDeleteAlert = false
+    @State private var showingColorPicker = false
+    @FocusState private var nameFocused: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    init(category: AppCategory, onRename: @escaping (String, String) -> Void,
+         onDelete: @escaping () -> Void) {
+        self.category = category
+        self.onRename = onRename
+        self.onDelete = onDelete
+        _nameDraft = State(initialValue: category.name)
+        _hexDraft = State(initialValue: category.colorHex)
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                showingColorPicker = true
+            } label: {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(ColorHex.color(from: hexDraft) ?? Color.gray)
+                    .frame(width: 22, height: 22)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(.white.opacity(0.4), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .pointingCursor()
+            .popover(isPresented: $showingColorPicker, arrowEdge: .bottom) {
+                ColorPalettePopover(
+                    selectedHex: hexDraft,
+                    onPick: { picked in
+                        hexDraft = picked
+                        showingColorPicker = false
+                        commit()
+                    }
+                )
+            }
+
+            TextField("이름", text: $nameDraft)
+                .textFieldStyle(.plain)
+                .font(.dbHeadline)
+                .focused($nameFocused)
+                .onSubmit { commit() }
+                .onChange(of: nameFocused) { focused in
+                    if !focused { commit() }
+                }
+
+            Spacer()
+
+            Button(role: .destructive) {
+                showingDeleteAlert = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(.secondary.opacity(scheme == .dark ? 0.16 : 0.08)))
+            }
+            .buttonStyle(.plain)
+            .pointingCursor()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.background.opacity(scheme == .dark ? 0.45 : 0.6))
+        )
+        .alert("'\(category.name)' 카테고리를 삭제할까요?", isPresented: $showingDeleteAlert) {
+            Button("취소", role: .cancel) {}
+            Button("삭제", role: .destructive) { onDelete() }
+        } message: {
+            Text("이 카테고리로 분류된 앱은 모두 미분류로 돌아갑니다.")
+        }
+    }
+
+    private func commit() {
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            nameDraft = category.name
+            return
+        }
+        if trimmed != category.name || hexDraft != category.colorHex {
+            onRename(trimmed, hexDraft)
+        }
+    }
+}
+
+/// Modal sheet for creating a new category. Keeps the row layout clean
+/// (a single "+ 카테고리 추가" button on the section header) while giving
+/// new-category creation enough room for both name + color picker.
+private struct CategoryAddSheet: View {
+    let onSave: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var name: String = ""
+    @State private var hex: String = AppCategory.palette[0]
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("새 카테고리").font(.dbCardTitle)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("이름").font(.dbStatLabel).foregroundStyle(.secondary)
+                TextField("예: 학습, 운동, 게임…", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($nameFocused)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("색상").font(.dbStatLabel).foregroundStyle(.secondary)
+                ColorPaletteGrid(selectedHex: hex, onPick: { hex = $0 })
+            }
+
+            HStack {
+                Spacer()
+                Button("취소") { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+                Button("추가") {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { onSave(trimmed, hex) }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 340)
+        .onAppear { nameFocused = true }
+    }
+}
+
+/// Compact swatch grid used by both the popover (from row edit) and the
+/// add-sheet. 9 colors fit on two rows; the current pick gets a ring.
+private struct ColorPaletteGrid: View {
+    let selectedHex: String
+    let onPick: (String) -> Void
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.fixed(30), spacing: 8), count: 5)
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(AppCategory.palette, id: \.self) { hex in
+                Button {
+                    onPick(hex)
+                } label: {
+                    Circle()
+                        .fill(ColorHex.color(from: hex) ?? Color.gray)
+                        .frame(width: 26, height: 26)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(hex == selectedHex
+                                              ? Color.primary
+                                              : Color.white.opacity(0.4),
+                                              lineWidth: hex == selectedHex ? 2 : 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointingCursor()
+            }
+        }
+    }
+}
+
+private struct ColorPalettePopover: View {
+    let selectedHex: String
+    let onPick: (String) -> Void
+
+    var body: some View {
+        ColorPaletteGrid(selectedHex: selectedHex, onPick: onPick)
+            .padding(12)
     }
 }

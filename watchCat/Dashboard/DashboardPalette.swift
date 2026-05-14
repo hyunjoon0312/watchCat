@@ -19,16 +19,12 @@ enum DashboardPalette {
     static let cellLow   = Color(.displayP3, red: 0.66, green: 0.61, blue: 0.96, opacity: 0.55)
     static let cellHigh  = Color(.displayP3, red: 0.30, green: 0.21, blue: 0.85, opacity: 1.0)
 
-    /// Category colors used both in the donut chart and per-app row chips.
-    /// Picked from a single jewel-tone family so legends stay coherent.
+    /// Category color. User-editable categories store their own swatch in
+    /// `AppCategory.colorHex`; the dashboard simply forwards it. Unclassified
+    /// (nil) keeps a neutral gray.
+    static let unclassifiedColor = Color(.displayP3, red: 0.65, green: 0.66, blue: 0.72, opacity: 1)
     static func color(for cat: AppCategory?) -> Color {
-        switch cat {
-        case .productivity:    return Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
-        case .communication:   return Color(.displayP3, red: 0.07, green: 0.66, blue: 0.66, opacity: 1)
-        case .entertainment:   return Color(.displayP3, red: 0.93, green: 0.42, blue: 0.51, opacity: 1)
-        case .other:           return Color(.displayP3, red: 0.55, green: 0.56, blue: 0.62, opacity: 1)
-        case nil:              return Color(.displayP3, red: 0.65, green: 0.66, blue: 0.72, opacity: 1)
-        }
+        cat?.color ?? unclassifiedColor
     }
 
     /// Up/down delta indicators.

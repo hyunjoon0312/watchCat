@@ -45,6 +45,9 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var topAppSeries: [AppDailySeries] = []
     @Published private(set) var heatmap: [HeatmapCell] = []
     @Published private(set) var categoryMapping: [String: AppCategory] = [:]
+    /// User-editable category list (loaded from `app_category_definitions`).
+    /// Drives the AppRow menu and the management UI on the category tab.
+    @Published private(set) var categories: [AppCategory] = []
     /// Total seconds for the same-length period immediately before `range`. Used
     /// for the "vs. 지난 기간" delta chip on the header.
     @Published private(set) var previousTotalSeconds: TimeInterval = 0
@@ -120,6 +123,7 @@ final class DashboardViewModel: ObservableObject {
         do {
             let r = range
             let now = Date()
+            self.categories = try store.listCategories()
             self.categoryMapping = try store.categoryMapping()
             self.appTotals = try store.appTotals(in: r, asOf: now)
             self.categoryTotals = try store.categoryTotals(in: r, asOf: now)
@@ -182,13 +186,13 @@ final class DashboardViewModel: ObservableObject {
             let yearFmt = DateFormatter()
             yearFmt.locale = Locale(identifier: "ko_KR")
             yearFmt.dateFormat = "yyyy년"
-            return "\(yearFmt.string(from: range.start)) · \(s) — \(e) (월~일)"
+            return "\(yearFmt.string(from: range.start)) · \(s) ~ \(e) (월~일)"
         case .month:
             fmt.dateFormat = "yyyy년 M월"
             return fmt.string(from: range.start)
         case .range:
             fmt.dateFormat = "yyyy.MM.dd"
-            return "\(fmt.string(from: range.start)) — \(fmt.string(from: range.end)) (\(range.dayCount)일)"
+            return "\(fmt.string(from: range.start)) ~ \(fmt.string(from: range.end)) (\(range.dayCount)일)"
         }
     }
 
@@ -225,6 +229,42 @@ final class DashboardViewModel: ObservableObject {
             reload()
         } catch {
             self.loadError = "카테고리 저장 실패: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Category definition CRUD
+
+    func addCategory(name: String, colorHex: String) {
+        guard let store else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            _ = try store.createCategory(name: trimmed, colorHex: colorHex)
+            reload()
+        } catch {
+            self.loadError = "카테고리 추가 실패: \(error.localizedDescription)"
+        }
+    }
+
+    func renameCategory(id: String, name: String, colorHex: String) {
+        guard let store else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try store.updateCategoryDefinition(id: id, name: trimmed, colorHex: colorHex)
+            reload()
+        } catch {
+            self.loadError = "카테고리 변경 실패: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteCategory(id: String) {
+        guard let store else { return }
+        do {
+            try store.deleteCategoryDefinition(id: id)
+            reload()
+        } catch {
+            self.loadError = "카테고리 삭제 실패: \(error.localizedDescription)"
         }
     }
 

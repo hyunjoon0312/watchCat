@@ -114,6 +114,22 @@ final class SessionStore {
                           on: WebSessionRecord.databaseTableName,
                           columns: ["day", "browserBundleID"])
         }
+        migrator.registerMigration("v6_user_categories") { db in
+            // User-editable category definitions. Built-in IDs match the v3
+            // enum raw values so existing app_categories rows keep resolving.
+            try db.create(table: AppCategoryDefinitionRecord.databaseTableName) { t in
+                t.column("id", .text).notNull().primaryKey()
+                t.column("name", .text).notNull()
+                t.column("colorHex", .text).notNull()
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+            }
+            for cat in AppCategory.builtIns {
+                try db.execute(sql: """
+                    INSERT INTO \(AppCategoryDefinitionRecord.databaseTableName)
+                    (id, name, colorHex, sortOrder) VALUES (?, ?, ?, ?)
+                    """, arguments: [cat.id, cat.name, cat.colorHex, cat.sortOrder])
+            }
+        }
         try migrator.migrate(dbQueue)
     }
 
@@ -261,7 +277,7 @@ final class SessionStore {
                 INSERT INTO \(AppCategoryRecord.databaseTableName) (bundleID, category)
                 VALUES (?, ?)
                 ON CONFLICT(bundleID) DO UPDATE SET category = excluded.category
-                """, arguments: [bundleID, category.rawValue])
+                """, arguments: [bundleID, category.id])
         }
     }
 
@@ -273,21 +289,74 @@ final class SessionStore {
         }
     }
 
-    func category(forBundleID bundleID: String) throws -> AppCategory? {
-        try dbQueue.read { db in
-            let rec = try AppCategoryRecord
-                .filter(AppCategoryRecord.Columns.bundleID == bundleID)
-                .fetchOne(db)
-            return rec?.resolvedCategory
-        }
-    }
-
+    /// Resolved bundleID → AppCategory map. Joins `app_categories` against
+    /// `app_category_definitions` so callers get fully-populated structs
+    /// (name + color) without a second lookup.
     func categoryMapping() throws -> [String: AppCategory] {
         try dbQueue.read { db in
             let rows = try AppCategoryRecord.fetchAll(db)
+            let defs = try AppCategoryDefinitionRecord.fetchAll(db)
+            let byID: [String: AppCategory] = Dictionary(uniqueKeysWithValues: defs.map {
+                ($0.id, AppCategory(id: $0.id, name: $0.name,
+                                    colorHex: $0.colorHex, sortOrder: $0.sortOrder))
+            })
             return rows.reduce(into: [:]) { acc, r in
-                if let cat = r.resolvedCategory { acc[r.bundleID] = cat }
+                if let cat = byID[r.category] { acc[r.bundleID] = cat }
             }
+        }
+    }
+
+    // MARK: - Category definitions CRUD
+
+    func listCategories() throws -> [AppCategory] {
+        try dbQueue.read { db in
+            try AppCategoryDefinitionRecord
+                .order(AppCategoryDefinitionRecord.Columns.sortOrder.asc,
+                       AppCategoryDefinitionRecord.Columns.name.asc)
+                .fetchAll(db)
+                .map { AppCategory(id: $0.id, name: $0.name,
+                                   colorHex: $0.colorHex, sortOrder: $0.sortOrder) }
+        }
+    }
+
+    @discardableResult
+    func createCategory(name: String, colorHex: String) throws -> AppCategory {
+        let id = UUID().uuidString
+        let nextOrder = try dbQueue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COALESCE(MAX(sortOrder), -1) + 1
+                FROM \(AppCategoryDefinitionRecord.databaseTableName)
+                """) ?? 0
+        }
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO \(AppCategoryDefinitionRecord.databaseTableName)
+                (id, name, colorHex, sortOrder) VALUES (?, ?, ?, ?)
+                """, arguments: [id, name, colorHex, nextOrder])
+        }
+        return AppCategory(id: id, name: name, colorHex: colorHex, sortOrder: nextOrder)
+    }
+
+    func updateCategoryDefinition(id: String, name: String, colorHex: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE \(AppCategoryDefinitionRecord.databaseTableName)
+                SET name = ?, colorHex = ?
+                WHERE id = ?
+                """, arguments: [name, colorHex, id])
+        }
+    }
+
+    /// Deletes a category definition. Apps mapped to it become unclassified
+    /// (their `app_categories` rows are removed in the same transaction).
+    func deleteCategoryDefinition(id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM \(AppCategoryRecord.databaseTableName) WHERE category = ?
+                """, arguments: [id])
+            try db.execute(sql: """
+                DELETE FROM \(AppCategoryDefinitionRecord.databaseTableName) WHERE id = ?
+                """, arguments: [id])
         }
     }
 
@@ -297,14 +366,14 @@ final class SessionStore {
                                asOf: Date = Date()) throws -> [CategoryTotal] {
         let appTotals = try dailyTotals(for: date, calendar: calendar, asOf: asOf)
         let mapping = try categoryMapping()
-        var bucket: [AppCategory?: TimeInterval] = [:]
+        let categories = try listCategories()
+        var bucket: [String?: TimeInterval] = [:]
         for total in appTotals {
-            let cat = mapping[total.bundleID]
-            bucket[cat, default: 0] += total.seconds
+            let id = mapping[total.bundleID]?.id
+            bucket[id, default: 0] += total.seconds
         }
-        // Stable order: defined enum order first, then unclassified at the end.
-        let ordered = AppCategory.allCases.compactMap { cat -> CategoryTotal? in
-            guard let seconds = bucket[cat] else { return nil }
+        let ordered: [CategoryTotal] = categories.compactMap { cat in
+            guard let seconds = bucket[cat.id] else { return nil }
             return CategoryTotal(category: cat, seconds: seconds)
         }
         if let unclassified = bucket[nil] {

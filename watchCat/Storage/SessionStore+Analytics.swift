@@ -113,12 +113,13 @@ extension SessionStore {
     func categoryTotals(in range: DayRange, asOf: Date = Date()) throws -> [CategoryTotal] {
         let apps = try appTotals(in: range, asOf: asOf)
         let mapping = try categoryMapping()
-        var bucket: [AppCategory?: TimeInterval] = [:]
+        let categories = try listCategories()
+        var bucket: [String?: TimeInterval] = [:]
         for t in apps {
-            bucket[mapping[t.bundleID], default: 0] += t.seconds
+            bucket[mapping[t.bundleID]?.id, default: 0] += t.seconds
         }
-        var ordered: [CategoryTotal] = AppCategory.allCases.compactMap { cat in
-            guard let s = bucket[cat] else { return nil }
+        var ordered: [CategoryTotal] = categories.compactMap { cat in
+            guard let s = bucket[cat.id] else { return nil }
             return CategoryTotal(category: cat, seconds: s)
         }
         if let unclassified = bucket[nil] {
