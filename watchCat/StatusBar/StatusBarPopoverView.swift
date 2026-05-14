@@ -202,7 +202,7 @@ private struct MainScreen: View {
 
     private var actionRow: some View {
         HStack(spacing: 10) {
-            actionButton(systemImage: "pawprint.fill", label: "지키미", action: onMascot)
+            actionButton(systemImage: "pawprint.fill", label: "캐릭터", action: onMascot)
             actionButton(systemImage: "chart.bar.xaxis", label: "대시보드", action: onDashboard)
             actionButton(systemImage: "gear", label: "설정", action: onSettings)
         }
@@ -319,7 +319,7 @@ private struct MascotScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            BackHeader(title: "지키미", onBack: onBack)
+            BackHeader(title: "캐릭터 선택", onBack: onBack)
             VStack(spacing: 4) {
                 ForEach(MascotKind.allCases) { kind in
                     MascotRow(
@@ -359,15 +359,9 @@ private struct MascotRow: View {
                         .frame(width: 8, height: 8)
                 }
                 .frame(width: 14)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(kind.displayName)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    Text(kind.blurb)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(kind.displayName)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
                 Spacer()
                 Image(nsImage: preview)
                     .interpolation(.high)
