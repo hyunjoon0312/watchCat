@@ -143,31 +143,28 @@ private struct MainScreen: View {
     }
 
     private var summaryBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(todayLabel)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                 Spacer()
+                Text(TimeFormatting.longHMS(model.todayTotalSeconds))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
             }
-            Text(TimeFormatting.longHMS(model.todayTotalSeconds))
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .monospacedDigit()
-            if model.todayTotals.isEmpty {
+            if model.todayTotals.isEmpty && model.todayWebTotals.isEmpty {
                 Text("아직 기록된 활동이 없습니다")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                     .padding(.vertical, 6)
             } else {
-                VStack(spacing: 6) {
-                    let cap = min(model.todayTotals.count, 3)
-                    let max = model.todayTotals.first?.seconds ?? 1
-                    ForEach(0..<cap, id: \.self) { idx in
-                        let t = model.todayTotals[idx]
-                        AppMiniRow(total: t, max: max,
-                                   category: model.categoryMapping[t.bundleID])
-                    }
+                appTopList
+                if !model.todayWebTotals.isEmpty {
+                    Divider().opacity(0.3)
+                    webTopList
                 }
             }
         }
@@ -176,6 +173,44 @@ private struct MainScreen: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.background.opacity(scheme == .dark ? 0.55 : 0.7))
         )
+    }
+
+    private var appTopList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("앱 TOP 3")
+            if model.todayTotals.isEmpty {
+                Text("기록된 앱이 없습니다")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                let cap = min(model.todayTotals.count, 3)
+                let maxSec = model.todayTotals.first?.seconds ?? 1
+                ForEach(0..<cap, id: \.self) { idx in
+                    let t = model.todayTotals[idx]
+                    AppMiniRow(total: t, max: maxSec,
+                               category: model.categoryMapping[t.bundleID])
+                }
+            }
+        }
+    }
+
+    private var webTopList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("웹 페이지 TOP 3")
+            let cap = min(model.todayWebTotals.count, 3)
+            let maxSec = model.todayWebTotals.first?.seconds ?? 1
+            ForEach(0..<cap, id: \.self) { idx in
+                let w = model.todayWebTotals[idx]
+                WebMiniRow(total: w, max: maxSec)
+            }
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .tracking(0.4)
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
     }
 
     private var pauseToggle: some View {
@@ -303,6 +338,47 @@ private struct AppMiniRow: View {
 
     private var barColor: Color {
         DashboardPalette.color(for: category)
+    }
+    private var fraction: Double {
+        guard max > 0 else { return 0 }
+        return min(1.0, total.seconds / max)
+    }
+}
+
+// MARK: - Web mini row (web bucket list)
+
+private struct WebMiniRow: View {
+    let total: WebBucketTotal
+    let max: TimeInterval
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(total.bucket)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Text(TimeFormatting.longHMS(total.seconds))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.secondary.opacity(0.12))
+                    Capsule()
+                        .fill(LinearGradient(colors: [barColor.opacity(0.7), barColor],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * fraction)
+                }
+            }
+            .frame(height: 4)
+        }
+    }
+
+    private var barColor: Color {
+        Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
     }
     private var fraction: Double {
         guard max > 0 else { return 0 }

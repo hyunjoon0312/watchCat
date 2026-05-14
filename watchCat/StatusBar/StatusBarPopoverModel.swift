@@ -20,6 +20,7 @@ final class StatusBarPopoverModel: ObservableObject {
     @Published private(set) var todayTotals: [AppTotal] = []
     @Published private(set) var todayTotalSeconds: TimeInterval = 0
     @Published private(set) var todayCategoryTotals: [CategoryTotal] = []
+    @Published private(set) var todayWebTotals: [WebBucketTotal] = []
     @Published private(set) var categoryMapping: [String: AppCategory] = [:]
     @Published private(set) var loadError: String?
 
@@ -62,12 +63,14 @@ final class StatusBarPopoverModel: ObservableObject {
             loadError = "DB 사용 불가"
             todayTotals = []; todayTotalSeconds = 0
             todayCategoryTotals = []
+            todayWebTotals = []
             return
         }
         do {
             todayTotals = try store.dailyTotals(for: Date())
             todayTotalSeconds = todayTotals.reduce(0) { $0 + $1.seconds }
             todayCategoryTotals = try store.dailyTotalsByCategory(for: Date())
+            todayWebTotals = try store.webBucketTotals(in: DashboardRange.day(Date()))
             categoryMapping = try store.categoryMapping()
             loadError = nil
         } catch {
