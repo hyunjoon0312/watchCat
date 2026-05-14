@@ -192,6 +192,46 @@ final class SessionStore {
         }
     }
 
+    /// Merged active intervals for the given day as fractions [0, 1] of the
+    /// 24-hour window (midnight → next midnight). Open sessions clamp at
+    /// `asOf`. Sessions outside the day are clipped at the boundaries so the
+    /// menubar timeline never extends past 24:00 or wraps to the next day.
+    func dailyActivityIntervals(for date: Date, calendar: Calendar = .current,
+                                asOf: Date = Date()) throws -> [(start: Double, end: Double)] {
+        let dayStart = calendar.startOfDay(for: date)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let dayKey = DayKey.string(for: date, calendar: calendar)
+        let raw: [(Date, Date)] = try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT startAt, COALESCE(endAt, ?) AS endAt
+                FROM \(SessionRecord.databaseTableName)
+                WHERE day = ?
+                """, arguments: [asOf, dayKey])
+            return rows.map { (($0["startAt"] as Date), ($0["endAt"] as Date)) }
+        }
+        let span = dayEnd.timeIntervalSince(dayStart)
+        guard span > 0 else { return [] }
+        // Clip to the day window, drop empties, then merge overlapping.
+        let clipped: [(Double, Double)] = raw.compactMap { (s, e) in
+            let cs = max(s, dayStart)
+            let ce = min(e, dayEnd)
+            guard ce > cs else { return nil }
+            return (cs.timeIntervalSince(dayStart) / span,
+                    ce.timeIntervalSince(dayStart) / span)
+        }
+        .sorted { $0.0 < $1.0 }
+        var merged: [(Double, Double)] = []
+        for iv in clipped {
+            if var last = merged.last, iv.0 <= last.1 {
+                last.1 = max(last.1, iv.1)
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(iv)
+            }
+        }
+        return merged
+    }
+
     func totalSeconds(for date: Date, calendar: Calendar = .current,
                       asOf: Date = Date()) throws -> TimeInterval {
         let totals = try dailyTotals(for: date, calendar: calendar, asOf: asOf)

@@ -86,6 +86,7 @@ private struct MainScreen: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             statusPill
+            DayTimeline(intervals: model.todayActivityIntervals)
             if model.permissionDenied { permissionBanner }
             summaryBlock
             Divider().opacity(0.4)
@@ -278,6 +279,78 @@ private struct MainScreen: View {
 
     private var accent: Color {
         Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
+    }
+}
+
+// MARK: - 24h activity timeline
+
+/// 0~24시 활동/휴식 막대. Filled segments are mac-active sessions for today;
+/// the gap between segments (sleep, shutdown, idle outside any session) is the
+/// rest period. The vertical "now" marker shows where we are in the day.
+private struct DayTimeline: View {
+    let intervals: [(start: Double, end: Double)]
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    // Rest background — single capsule, the active rectangles
+                    // mask sit on top so the visible "rest" portions are
+                    // whatever the active bars don't cover.
+                    Capsule()
+                        .fill(.secondary.opacity(scheme == .dark ? 0.22 : 0.16))
+
+                    ForEach(intervals.indices, id: \.self) { idx in
+                        let iv = intervals[idx]
+                        let width = max(2, geo.size.width * (iv.end - iv.start))
+                        Capsule()
+                            .fill(accent)
+                            .frame(width: width)
+                            .offset(x: geo.size.width * iv.start)
+                    }
+
+                    // "Now" tick.
+                    Rectangle()
+                        .fill(.primary.opacity(0.7))
+                        .frame(width: 1.5)
+                        .offset(x: geo.size.width * nowFraction)
+                }
+            }
+            .frame(height: 10)
+
+            HStack(spacing: 0) {
+                tickLabel("0")
+                Spacer()
+                tickLabel("6")
+                Spacer()
+                tickLabel("12")
+                Spacer()
+                tickLabel("18")
+                Spacer()
+                tickLabel("24")
+            }
+        }
+    }
+
+    private func tickLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+    }
+
+    private var accent: Color {
+        Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
+    }
+
+    private var nowFraction: Double {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return 0 }
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return 0 }
+        return min(1, max(0, Date().timeIntervalSince(start) / span))
     }
 }
 
