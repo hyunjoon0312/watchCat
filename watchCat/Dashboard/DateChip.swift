@@ -143,7 +143,7 @@ struct MonthChip: View {
     private var label: String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "ko_KR")
-        f.dateFormat = "yyyy년 M월"
+        f.dateFormat = "yyyy.MM"
         return f.string(from: date)
     }
     private var yearComponent: Int { calendar.component(.year, from: date) }

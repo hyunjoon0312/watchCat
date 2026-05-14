@@ -512,13 +512,15 @@ struct DashboardView: View {
 
     private func dayLabel(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR")
-        f.dateFormat = "yyyy년 M월 d일 (E)"
+        f.dateFormat = "yyyy.MM.dd (E)"
         return f.string(from: d)
     }
     private func weekLabel(_ r: DayRange) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR")
-        f.dateFormat = "M월 d일"
-        return "\(f.string(from: r.start)) — \(f.string(from: r.end))"
+        f.dateFormat = "yyyy.MM.dd"
+        let endShort = DateFormatter(); endShort.locale = Locale(identifier: "ko_KR")
+        endShort.dateFormat = "MM.dd"
+        return "\(f.string(from: r.start)) — \(endShort.string(from: r.end))"
     }
     private func shortDate(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR")
