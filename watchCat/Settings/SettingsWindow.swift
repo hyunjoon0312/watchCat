@@ -43,7 +43,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 struct SettingsView: View {
     @StateObject private var permissions = PermissionManager.shared
     @State private var retentionDays: Int = RetentionSettings.days
-    @State private var selectedMascot: MascotKind = MascotKind.current
     @State private var operationMessage: String?
     @State private var operationIsError: Bool = false
     @State private var importReplaceMode: Bool = false
@@ -70,16 +69,6 @@ struct SettingsView: View {
                     set: { permissions.setLaunchAtLogin($0) }
                 ))
                 .font(.callout)
-
-                Divider()
-
-                sectionHeader("마스코트")
-                MascotPicker(selection: $selectedMascot)
-                    .onChange(of: selectedMascot) { _, newValue in
-                        MascotKind.current = newValue
-                    }
-                Text("상태바 아이콘으로 보일 캐릭터를 선택합니다. 변경은 즉시 반영됩니다.")
-                    .font(.caption).foregroundStyle(.secondary)
 
                 Divider()
 
