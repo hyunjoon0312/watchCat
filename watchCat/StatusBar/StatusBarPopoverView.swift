@@ -88,7 +88,6 @@ private struct MainScreen: View {
             statusPill
             if model.permissionDenied { permissionBanner }
             summaryBlock
-            pauseToggle
             Divider().opacity(0.4)
             actionRow
         }
@@ -211,28 +210,6 @@ private struct MainScreen: View {
             .tracking(0.4)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
-    }
-
-    private var pauseToggle: some View {
-        Button {
-            model.togglePause()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: model.isPaused ? "play.fill" : "pause.fill")
-                    .font(.system(size: 11, weight: .bold))
-                Text(model.isPaused ? "기록 재개" : "일시중지")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(model.isPaused ? Color.green : Color.orange)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill((model.isPaused ? Color.green : Color.orange).opacity(0.14))
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { h in if h { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
     }
 
     private var actionRow: some View {
