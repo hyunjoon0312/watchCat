@@ -24,11 +24,13 @@ if ! command -v rsvg-convert >/dev/null 2>&1; then
 fi
 
 SPECIES=(
-  cat
-  orange-cat
-  shiba
-  owl
-  capybara
+  cloud-cat
+  cheese-cat
+  calico-cat
+  bean-shiba
+  cozy-bear
+  round-owl
+  chill-capybara
 )
 
 FRAMES=(

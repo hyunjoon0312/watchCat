@@ -77,7 +77,7 @@ private struct WelcomeStep: View {
                 .multilineTextAlignment(.center)
 
             VStack(alignment: .leading, spacing: 10) {
-                Label("상태바 마스코트가 기록 상태를 표시", systemImage: "menubar.rectangle")
+                Label("상태바 캐릭터가 기록 상태를 표시", systemImage: "menubar.rectangle")
                 Label("잠금·슬립·자리비움 시 자동 일시중지", systemImage: "moon.zzz")
                 Label("외부 전송 없음, 로컬 SQLite에만 저장", systemImage: "lock.shield")
             }
