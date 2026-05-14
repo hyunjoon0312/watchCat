@@ -298,6 +298,7 @@ private struct DayTimeline: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            legend
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     // Rest background — a warm-tinted neutral so the visible
@@ -335,7 +336,7 @@ private struct DayTimeline: View {
                         .offset(x: geo.size.width * nowFraction)
                 }
             }
-            .frame(height: 10)
+            .frame(height: 14)
 
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
@@ -346,6 +347,34 @@ private struct DayTimeline: View {
                 }
             }
             .frame(height: 12)
+        }
+    }
+
+    /// Inline legend so the bar's two colors are self-explanatory at a glance.
+    /// Shows total hms for each bucket so the user can see "today I was active
+    /// 5h 23m / rested 18h 37m" without parsing widths.
+    private var legend: some View {
+        let activeSeconds = intervals.reduce(0.0) { $0 + ($1.end - $1.start) } * 86400
+        let restSeconds = max(0, 86400 - activeSeconds)
+        return HStack(spacing: 12) {
+            legendItem(color: activeStart, label: "활동", seconds: activeSeconds)
+            legendItem(color: restColor, label: "휴식", seconds: restSeconds)
+            Spacer()
+        }
+    }
+
+    private func legendItem(color: Color, label: String, seconds: TimeInterval) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(color)
+                .frame(width: 10, height: 10)
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+            Text(TimeFormatting.longHMS(seconds))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
         }
     }
 
