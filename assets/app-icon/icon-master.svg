@@ -1,46 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Rounded square background. Slight diagonal gradient gives the icon
-       depth without going maximalist; corner radius matches macOS Big Sur
-       app-icon convention (~22% of edge). -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%"  stop-color="#3E92F0"/>
-      <stop offset="100%" stop-color="#1F6AD8"/>
-    </linearGradient>
-    <filter id="catShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
-      <feOffset dx="0" dy="10"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
-      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+  <!-- Flat-style app icon: solid blue rounded square + minimal white cat
+       silhouette with two black dot eyes. No gradient, no shadow, no
+       detail beyond the eyes — matches the reference. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#1E8FE3"/>
 
-  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="url(#bg)"/>
-
-  <!-- Subtle highlight band at the top for the glossy-app-icon feel. -->
-  <rect x="0" y="0" width="1024" height="380" rx="225" ry="225"
-        fill="white" opacity="0.10"/>
-
-  <!-- Cat mascot, centered. The source viewBox is 3 3 26 26 so we translate
-       into a 700×700 box positioned at (162, 192) — slightly above center
-       to leave breathing room for the dot tail of the mascot. -->
-  <g transform="translate(162 192) scale(26.92)" filter="url(#catShadow)">
+  <!-- Cat head silhouette, slightly upper-left so it reads as a "peeking"
+       face. The shape is the mascot's head with the bottom flattened so
+       it sits like a pillow rather than a full body. -->
+  <g transform="translate(150 200) scale(22)">
     <path d="M 5.2 15.2 Q 5 12.9 6.1 10.3 L 8.5 6.1 Q 9.1 5 10.3 5.5 L 14.1 8.8 Q 16 8.3 17.9 8.8 L 21.7 5.5 Q 22.9 5 23.5 6.1 L 25.9 10.3 Q 27 12.9 26.8 15.2 C 27.2 22.6 22.8 28 16 28 C 9.2 28 4.8 22.6 5.2 15.2 Z"
-          fill="#FFFFFF" stroke="#1E1E1E" stroke-width="1.0" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="M 8.9 8.2 L 10.7 11.5 L 8.2 12 Z" fill="#FFC0D4"/>
-    <path d="M 23.1 8.2 L 23.8 12 L 21.3 11.5 Z" fill="#FFC0D4"/>
-    <path d="M 6.6 21.5 Q 16 27.4 25.4 21.5 Q 23.6 27.8 16 27.8 Q 8.4 27.8 6.6 21.5 Z" fill="#F5F7FC"/>
-    <path d="M 4.2 17.4 L 9 18.8 M 3.8 20.9 L 8.9 20.9 M 4.5 24.2 L 9.4 22.9"
-          fill="none" stroke="#1E1E1E" stroke-width="0.7" stroke-linecap="round"/>
-    <path d="M 27.8 17.4 L 23 18.8 M 28.2 20.9 L 23.1 20.9 M 27.5 24.2 L 22.6 22.9"
-          fill="none" stroke="#1E1E1E" stroke-width="0.7" stroke-linecap="round"/>
-    <ellipse cx="11.4" cy="18.7" rx="2.0" ry="2.8" fill="#1E2736"/>
-    <ellipse cx="20.6" cy="18.7" rx="2.0" ry="2.8" fill="#1E2736"/>
-    <circle cx="12.1" cy="17.4" r="0.85" fill="#FFFFFF"/>
-    <circle cx="21.3" cy="17.4" r="0.85" fill="#FFFFFF"/>
-    <ellipse cx="10.1" cy="22.1" rx="1.9" ry="1.0" fill="#FFB4C8" opacity="0.7"/>
-    <ellipse cx="21.9" cy="22.1" rx="1.9" ry="1.0" fill="#FFB4C8" opacity="0.7"/>
-    <path d="M 14.5 20.9 Q 16 20.3 17.5 20.9 Q 17 21.8 16 22 Q 15 21.8 14.5 20.9 Z" fill="#243044"/>
-    <path d="M 16 22 L 16 24.4" fill="none" stroke="#1E1E1E" stroke-width="0.55" stroke-linecap="round"/>
+          fill="#FFFFFF"/>
   </g>
+
+  <!-- Two clean eye dots — the only facial feature, matching the reference. -->
+  <circle cx="395" cy="600" r="32" fill="#1A2030"/>
+  <circle cx="600" cy="600" r="32" fill="#1A2030"/>
 </svg>
