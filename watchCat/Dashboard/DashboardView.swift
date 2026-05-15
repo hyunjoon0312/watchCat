@@ -812,6 +812,9 @@ private struct AppRow: View {
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                             .animation(.easeInOut(duration: 0.18), value: isExpanded)
                     }
+                    Image(nsImage: AppIconProvider.icon(for: total.bundleID, size: 18))
+                        .interpolation(.high)
+                        .frame(width: 18, height: 18)
                     Text(total.displayName)
                         .font(.dbHeadline)
                         .lineLimit(1)
@@ -995,11 +998,7 @@ private struct PageDrillDownRow: View {
     var body: some View {
         let tint = DashboardPalette.stableColor(for: page.bucket)
         HStack(spacing: 10) {
-            // Tinted dot acts as a per-domain swatch — once a user knows
-            // "teal = github", they spot it across sessions without reading.
-            Image(systemName: "circle.fill")
-                .font(.system(size: 7))
-                .foregroundStyle(tint)
+            FaviconView(host: page.bucket, size: 14)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(page.bucket)
@@ -1048,9 +1047,7 @@ private struct WebRow: View {
             rankBadge(rank: rank, tint: tint)
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(tint)
+                    FaviconView(host: total.bucket, size: 18)
                     Text(total.bucket)
                         .font(.dbHeadline)
                         .lineLimit(1)

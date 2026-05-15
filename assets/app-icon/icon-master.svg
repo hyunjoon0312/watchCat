@@ -1,18 +1,113 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Flat-style app icon: solid blue rounded square + minimal white cat
-       silhouette with two black dot eyes. No gradient, no shadow, no
-       detail beyond the eyes — matches the reference. -->
-  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#1E8FE3"/>
+  <defs>
+    <!-- Brand indigo gradient — same hue family as the dashboard accent so the
+         icon, status pill, and chart fills all read as one product. -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7B6CF5"/>
+      <stop offset="100%" stop-color="#3F30C8"/>
+    </linearGradient>
+    <!-- Subtle face shading so the cat reads as a soft volume rather than
+         a flat sticker. -->
+    <radialGradient id="face" cx="50%" cy="42%" r="62%">
+      <stop offset="0%"  stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8E6F4"/>
+    </radialGradient>
+    <!-- Inner-ear blush. -->
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#FF9CB8"/>
+      <stop offset="100%" stop-color="#F37FA0"/>
+    </linearGradient>
+    <!-- Eye gloss highlight. -->
+    <radialGradient id="eye" cx="35%" cy="30%" r="80%">
+      <stop offset="0%"  stop-color="#3A4258"/>
+      <stop offset="100%" stop-color="#161B26"/>
+    </radialGradient>
+  </defs>
 
-  <!-- Cat head silhouette, slightly upper-left so it reads as a "peeking"
-       face. The shape is the mascot's head with the bottom flattened so
-       it sits like a pillow rather than a full body. -->
-  <g transform="translate(150 200) scale(22)">
-    <path d="M 5.2 15.2 Q 5 12.9 6.1 10.3 L 8.5 6.1 Q 9.1 5 10.3 5.5 L 14.1 8.8 Q 16 8.3 17.9 8.8 L 21.7 5.5 Q 22.9 5 23.5 6.1 L 25.9 10.3 Q 27 12.9 26.8 15.2 C 27.2 22.6 22.8 28 16 28 C 9.2 28 4.8 22.6 5.2 15.2 Z"
-          fill="#FFFFFF"/>
+  <!-- Rounded square background. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" ry="232" fill="url(#bg)"/>
+
+  <!-- Soft top highlight gives the icon a "lit from above" feel without
+       leaning fully into glossy iOS 6 territory. -->
+  <rect x="0" y="0" width="1024" height="420" rx="232" ry="232"
+        fill="#FFFFFF" opacity="0.08"/>
+
+  <!-- Sparkles in the negative space: tells the user this cat is "watching"
+       (the app's job) without being literal. Diagonal placement keeps the
+       composition off-center and modern. -->
+  <g fill="#FFFFFF" opacity="0.85">
+    <path d="M 196 198
+             L 209 222
+             L 235 230
+             L 209 238
+             L 196 262
+             L 183 238
+             L 157 230
+             L 183 222 Z" opacity="0.5"/>
+    <path d="M 858 832
+             L 868 850
+             L 887 856
+             L 868 862
+             L 858 880
+             L 848 862
+             L 829 856
+             L 848 850 Z" opacity="0.45"/>
+    <circle cx="846" cy="220" r="6" opacity="0.45"/>
+    <circle cx="166" cy="836" r="5" opacity="0.45"/>
   </g>
 
-  <!-- Two clean eye dots — the only facial feature, matching the reference. -->
-  <circle cx="395" cy="600" r="32" fill="#1A2030"/>
-  <circle cx="600" cy="600" r="32" fill="#1A2030"/>
+  <!-- Outer ears: rounded triangles, soft-cornered for the modern feel.
+       Drawn before the face so the face hides their bottom edge. -->
+  <path d="M 268 410
+           Q 248 232 268 232
+           Q 320 232 418 360
+           Z" fill="url(#face)"/>
+  <path d="M 606 360
+           Q 704 232 756 232
+           Q 776 232 756 410
+           Z" fill="url(#face)"/>
+
+  <!-- Inner ears: smaller blush triangles inside, slightly inset. -->
+  <path d="M 296 388
+           Q 282 280 296 272
+           Q 332 280 398 358
+           Z" fill="url(#ear)" opacity="0.85"/>
+  <path d="M 626 358
+           Q 692 280 728 272
+           Q 742 280 728 388
+           Z" fill="url(#ear)" opacity="0.85"/>
+
+  <!-- Face — a single soft ellipse. Big, centered, generous margin to the
+       icon edges so the silhouette reads cleanly at 16px. -->
+  <ellipse cx="512" cy="588" rx="300" ry="280" fill="url(#face)"/>
+
+  <!-- Eyes — large round shapes for an attentive "watching" look.
+       Slightly compressed vertically so they read as alert, not surprised. -->
+  <ellipse cx="408" cy="548" rx="58" ry="70" fill="url(#eye)"/>
+  <ellipse cx="616" cy="548" rx="58" ry="70" fill="url(#eye)"/>
+
+  <!-- Eye highlights: one big upper crescent + a small lower dot. Modern
+       cartoon-eye convention — feels animated even though it's static. -->
+  <ellipse cx="426" cy="514" rx="22" ry="18" fill="#FFFFFF"/>
+  <ellipse cx="634" cy="514" rx="22" ry="18" fill="#FFFFFF"/>
+  <circle  cx="386" cy="578" r="8" fill="#FFFFFF" opacity="0.75"/>
+  <circle  cx="594" cy="578" r="8" fill="#FFFFFF" opacity="0.75"/>
+
+  <!-- Nose: rounded heart-like triangle. Pink reads warmer than the
+       previous detailed mascot's mauve. -->
+  <path d="M 482 658
+           Q 480 644 498 644
+           L 526 644
+           Q 544 644 542 658
+           Q 540 686 512 700
+           Q 484 686 482 658 Z"
+        fill="#FF7E9F"/>
+
+  <!-- Mouth: a tiny vertical drop from the nose, then a soft smile. -->
+  <path d="M 512 700 L 512 720" stroke="#1A2030" stroke-width="6"
+        stroke-linecap="round" fill="none"/>
+  <path d="M 512 720 Q 488 738 460 728" stroke="#1A2030" stroke-width="6"
+        stroke-linecap="round" fill="none"/>
+  <path d="M 512 720 Q 536 738 564 728" stroke="#1A2030" stroke-width="6"
+        stroke-linecap="round" fill="none"/>
 </svg>

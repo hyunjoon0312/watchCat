@@ -433,7 +433,10 @@ private struct AppMiniRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(nsImage: AppIconProvider.icon(for: total.bundleID, size: 14))
+                    .interpolation(.high)
+                    .frame(width: 14, height: 14)
                 Text(total.displayName)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .lineLimit(1)
@@ -473,7 +476,8 @@ private struct WebMiniRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                FaviconView(host: total.bucket, size: 14)
                 Text(total.bucket)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .lineLimit(1)
@@ -616,12 +620,53 @@ private struct MoreScreen: View {
                     .fill(.background.opacity(scheme == .dark ? 0.45 : 0.7))
             )
         }
-        .alert("watchCat", isPresented: $showingAbout) {
-            Button("확인", role: .cancel) {}
-        } message: {
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-            Text("버전 \(version)\n맥 사용시간을 자동 기록하는 상태바 앱입니다.")
+        .sheet(isPresented: $showingAbout) {
+            AboutSheet { showingAbout = false }
         }
+    }
+}
+
+/// "watchCat 정보" sheet. Custom view instead of `.alert` so we can show the
+/// real app icon at a size that reads as a brand mark rather than the
+/// system's tiny alert glyph.
+private struct AboutSheet: View {
+    let onClose: () -> Void
+
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            // NSImage(named: "AppIcon") gives the real, system-resolved app
+            // icon — same image macOS uses in Finder / Dock. Size: 96 reads
+            // as a brand mark without dominating the sheet.
+            Image(nsImage: NSApp.applicationIconImage ?? NSImage())
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 96, height: 96)
+
+            VStack(spacing: 4) {
+                Text("watchCat")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                Text("버전 \(version)")
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("맥 사용시간을 자동으로 기록하는 상태바 앱입니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 240)
+
+            Button("확인") { onClose() }
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 22)
+        .frame(width: 300)
     }
 }
 
@@ -645,9 +690,6 @@ private struct MoreItem: View {
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(isDestructive ? Color.red : .primary)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 8).padding(.vertical, 8)
             .background(
