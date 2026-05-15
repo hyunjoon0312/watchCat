@@ -68,7 +68,10 @@ private struct WelcomeStep: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            Text("🐱").font(.system(size: 76))
+            Image(nsImage: NSApp.applicationIconImage ?? NSImage())
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 96, height: 96)
             Text("watchCat")
                 .font(.system(size: 28, weight: .semibold))
             Text("맥에서 어떤 앱·웹사이트를 얼마나 쓰는지\n자동으로 기록합니다.")

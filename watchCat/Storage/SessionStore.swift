@@ -170,6 +170,12 @@ final class SessionStore {
     /// Open sessions (`endAt IS NULL`) — the row representing the app you're using
     /// right now — count as `asOf - startAt` so the menu's "today" total reflects
     /// elapsed time live instead of showing 0 until you switch apps.
+    /// Apps used for less than this many seconds in the aggregation period
+    /// are excluded from every per-app surface (lists, totals, categories).
+    /// Brief "just passing through" launches are noise — they crowd the list
+    /// without telling the user anything useful.
+    static let minimumAppSeconds: TimeInterval = 60
+
     func dailyTotals(for date: Date, calendar: Calendar = .current,
                      asOf: Date = Date()) throws -> [AppTotal] {
         let dayKey = DayKey.string(for: date, calendar: calendar)
@@ -180,8 +186,9 @@ final class SessionStore {
                 FROM \(SessionRecord.databaseTableName)
                 WHERE day = ?
                 GROUP BY bundleID, displayName
+                HAVING seconds >= ?
                 ORDER BY seconds DESC
-                """, arguments: [asOf, dayKey])
+                """, arguments: [asOf, dayKey, Self.minimumAppSeconds])
             return rows.map { row in
                 AppTotal(
                     bundleID: row["bundleID"],

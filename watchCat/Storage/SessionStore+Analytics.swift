@@ -32,7 +32,9 @@ extension SessionStore {
     // MARK: - Range queries (app sessions)
 
     /// Per-app totals across a closed day range. Open sessions count `asOf - startAt`
-    /// just like `dailyTotals(for:)` so live data shows up immediately.
+    /// just like `dailyTotals(for:)` so live data shows up immediately. Apps with
+    /// total time below `SessionStore.minimumAppSeconds` are filtered out (short
+    /// pass-through launches are noise — see SessionStore for the rationale).
     func appTotals(in range: DayRange, asOf: Date = Date()) throws -> [AppTotal] {
         let (first, last) = range.dayKeys
         return try dbQueue.read { db in
@@ -42,8 +44,9 @@ extension SessionStore {
                 FROM \(SessionRecord.databaseTableName)
                 WHERE day BETWEEN ? AND ?
                 GROUP BY bundleID, displayName
+                HAVING seconds >= ?
                 ORDER BY seconds DESC
-                """, arguments: [asOf, first, last])
+                """, arguments: [asOf, first, last, SessionStore.minimumAppSeconds])
             return rows.map {
                 AppTotal(bundleID: $0["bundleID"], displayName: $0["displayName"],
                          seconds: $0["seconds"] ?? 0)
@@ -56,7 +59,8 @@ extension SessionStore {
         try appTotals(in: range, asOf: asOf).reduce(0) { $0 + $1.seconds }
     }
 
-    /// One series point per day (sum across all apps).
+    /// One series point per day (sum across all apps that pass the minimum-
+    /// duration threshold, so the chart total matches the app-list total).
     func dailySeries(in range: DayRange, asOf: Date = Date()) throws -> [DailySeriesPoint] {
         let (first, last) = range.dayKeys
         let rows: [String: TimeInterval] = try dbQueue.read { db in
@@ -65,8 +69,14 @@ extension SessionStore {
                        SUM((julianday(COALESCE(endAt, ?)) - julianday(startAt)) * 86400.0) AS seconds
                 FROM \(SessionRecord.databaseTableName)
                 WHERE day BETWEEN ? AND ?
+                  AND bundleID IN (
+                    SELECT bundleID FROM \(SessionRecord.databaseTableName)
+                    WHERE day BETWEEN ? AND ?
+                    GROUP BY bundleID
+                    HAVING SUM((julianday(COALESCE(endAt, ?)) - julianday(startAt)) * 86400.0) >= ?
+                  )
                 GROUP BY day
-                """, arguments: [asOf, first, last])
+                """, arguments: [asOf, first, last, first, last, asOf, SessionStore.minimumAppSeconds])
             var out: [String: TimeInterval] = [:]
             for r in raw { out[r["day"]] = r["seconds"] ?? 0 }
             return out
@@ -163,11 +173,20 @@ extension SessionStore {
                              asOf: Date = Date()) throws -> [HeatmapCell] {
         let (first, last) = range.dayKeys
         let sessions: [(Date, Date)] = try dbQueue.read { db in
+            // Same threshold filter as appTotals — keep the heatmap and the
+            // hourly chart consistent with the app list. Sessions from
+            // short-use apps are dropped before they reach the bucketing loop.
             let rows = try Row.fetchAll(db, sql: """
                 SELECT startAt, COALESCE(endAt, ?) AS endAt
                 FROM \(SessionRecord.databaseTableName)
                 WHERE day BETWEEN ? AND ?
-                """, arguments: [asOf, first, last])
+                  AND bundleID IN (
+                    SELECT bundleID FROM \(SessionRecord.databaseTableName)
+                    WHERE day BETWEEN ? AND ?
+                    GROUP BY bundleID
+                    HAVING SUM((julianday(COALESCE(endAt, ?)) - julianday(startAt)) * 86400.0) >= ?
+                  )
+                """, arguments: [asOf, first, last, first, last, asOf, SessionStore.minimumAppSeconds])
             return rows.map { (($0["startAt"] as Date), ($0["endAt"] as Date)) }
         }
 

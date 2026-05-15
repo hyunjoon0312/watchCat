@@ -51,17 +51,47 @@ final class PermissionManager: ObservableObject {
             let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         case .screenRecording:
+            // macOS force-terminates apps when Screen Recording TCC state
+            // changes — there's no graceful re-evaluation. Detach a watcher
+            // process that reopens watchCat after we die so the user doesn't
+            // have to manually relaunch from Finder.
+            Self.spawnRelauncherIfTerminated(timeoutSeconds: 30)
             _ = CGRequestScreenCaptureAccess()
         case .appleEvents:
-            // Prompt for every supported browser. macOS only shows a prompt for
-            // browsers that are installed *and* haven't been answered before,
-            // so this is a no-op for missing browsers / already-granted ones.
+            // Same defensive relauncher: prompts can occasionally cascade and
+            // surface edge cases that leave the app in a bad state. Spawning
+            // is safe — if we never die, the relauncher loop just gives up.
+            Self.spawnRelauncherIfTerminated(timeoutSeconds: 30)
             _ = checkAnyBrowserAutomation(prompt: true)
         }
         // System dialogs may take a moment; re-check shortly after.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.refresh()
         }
+    }
+
+    /// Fire-and-forget shell helper that polls our PID for `timeoutSeconds`
+    /// seconds. The moment our process disappears (TCC kill), it `open`s the
+    /// app bundle so watchCat comes back automatically. If we never die
+    /// (user denied / closed the prompt), the loop just exits.
+    private static func spawnRelauncherIfTerminated(timeoutSeconds: Int) {
+        let bundlePath = Bundle.main.bundlePath
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        PID=\(myPID)
+        for i in $(seq 1 \(timeoutSeconds)); do
+          if ! kill -0 $PID 2>/dev/null; then
+            sleep 1
+            /usr/bin/open -n "\(bundlePath)"
+            exit 0
+          fi
+          sleep 1
+        done
+        """
+        let task = Process()
+        task.launchPath = "/bin/sh"
+        task.arguments = ["-c", script]
+        try? task.run()
     }
 
     func openSystemSettings(for kind: PermissionKind) {
@@ -104,6 +134,13 @@ final class PermissionManager: ObservableObject {
     }
 
     private func checkAutomation(target bundleID: String, prompt: Bool) -> Bool {
+        // Skip uninstalled browsers — calling AEDeterminePermissionToAutomateTarget
+        // against a missing bundle can stall the prompt loop / produce confusing
+        // TCC dialogs for apps the user doesn't even have. If they install the
+        // browser later, the next refresh will pick it up.
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else {
+            return false
+        }
         let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
         guard let descPtr = target.aeDesc else { return false }
         var desc = descPtr.pointee
