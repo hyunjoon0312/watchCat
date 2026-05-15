@@ -1,6 +1,6 @@
 cask "watchcat" do
   version "1.0.1"
-  sha256 "106d9dfd5b02b697b06313ec176c10f31b437302ed11e9a47baa1f55f95c5089"
+  sha256 "04e40b46c1ee8249e18b48e4948da7a47e8cb823c12f2a0a94b601faf1698740"
 
   url "https://github.com/hyunjoon0312/watchCat/releases/download/v#{version}/watchCat-#{version}.zip"
   name "watchCat"
