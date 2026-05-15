@@ -81,6 +81,12 @@ final class StatusBarController: NSObject {
         // Refresh today's totals every time the user opens the popover so the
         // numbers don't read stale after long stretches of menubar inactivity.
         popoverModel.reload()
+        // NSPopover keeps its own `appearance` and doesn't pick up
+        // `NSApp.appearance` automatically, so the popover would stay in
+        // whatever mode it was created in even after the user switched
+        // themes. Re-applying on show keeps it in sync — passing `nil`
+        // (system mode) lets it follow the OS like before.
+        popover.appearance = NSApp.appearance
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
         installClickMonitor()
