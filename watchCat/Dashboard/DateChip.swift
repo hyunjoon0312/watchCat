@@ -38,11 +38,14 @@ struct DateChip: View {
             .padding(.horizontal, 14).padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.55 : 0.95))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(DashboardPalette.accentMuted.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(scheme == .dark
+                                  ? DashboardPalette.accentMuted.opacity(0.4)
+                                  : DashboardPalette.accentMuted.opacity(0.55),
+                                  lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -90,11 +93,14 @@ struct MonthChip: View {
             .padding(.horizontal, 14).padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.55 : 0.95))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(DashboardPalette.accentMuted.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(scheme == .dark
+                                  ? DashboardPalette.accentMuted.opacity(0.4)
+                                  : DashboardPalette.accentMuted.opacity(0.55),
+                                  lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

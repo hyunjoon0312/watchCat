@@ -133,11 +133,11 @@ struct DashboardView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.55 : 0.95))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(.secondary.opacity(0.15), lineWidth: 1)
+                    .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
             )
 
             // Same NSButton label-stripping issue as the "오늘" pill — render
@@ -164,9 +164,9 @@ struct DashboardView: View {
                 .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
                 .background(
-                    Circle().fill(.background.opacity(scheme == .dark ? 0.55 : 0.9))
+                    Circle().fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
                 )
-                .overlay(Circle().strokeBorder(.secondary.opacity(0.18), lineWidth: 1))
+                .overlay(Circle().strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .pointingCursor()
@@ -1345,7 +1345,11 @@ private struct CategoryEditRow: View {
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.background.opacity(scheme == .dark ? 0.45 : 0.6))
+                .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
         )
         .opacity(isDragging ? 0.4 : 1.0)
         .alert("'\(category.name)' 카테고리를 삭제할까요?", isPresented: $showingDeleteAlert) {

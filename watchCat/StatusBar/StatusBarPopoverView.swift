@@ -63,11 +63,13 @@ struct StatusBarPopoverView: View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(scheme == .dark
                   ? Color(.displayP3, red: 0.10, green: 0.09, blue: 0.13, opacity: 1)
-                  : Color(.displayP3, red: 0.98, green: 0.97, blue: 1.00, opacity: 1))
+                  : Color(.displayP3, red: 1.00, green: 0.99, blue: 1.00, opacity: 1))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(.white.opacity(scheme == .dark ? 0.05 : 0.4), lineWidth: 1)
+                    .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
             )
+            .shadow(color: DashboardPalette.surfaceShadow(dark: scheme == .dark),
+                    radius: scheme == .dark ? 14 : 22, x: 0, y: scheme == .dark ? 6 : 8)
     }
 }
 
@@ -171,7 +173,7 @@ private struct MainScreen: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.background.opacity(scheme == .dark ? 0.55 : 0.7))
+                .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
         )
     }
 
@@ -236,7 +238,7 @@ private struct MainScreen: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.55 : 0.7))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -535,7 +537,7 @@ private struct MascotScreen: View {
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.45 : 0.7))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
         }
     }
@@ -617,7 +619,7 @@ private struct MoreScreen: View {
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.background.opacity(scheme == .dark ? 0.45 : 0.7))
+                    .fill(DashboardPalette.surfaceMuted(dark: scheme == .dark))
             )
         }
         .sheet(isPresented: $showingAbout) {

@@ -60,15 +60,71 @@ enum DashboardPalette {
         return series[Int(hash % UInt64(series.count))]
     }
 
-    /// Subtle page background — a faint horizontal gradient that adds depth
-    /// without competing with the cards.
+    /// Light-mode page background. Slightly more pigment than the previous
+    /// near-white so cards can sit on top of it with a clear separation. A
+    /// soft lavender → ivory diagonal keeps the indigo brand mood without
+    /// competing for attention.
     static let backgroundGradient = LinearGradient(
         colors: [
-            Color(.displayP3, red: 0.96, green: 0.95, blue: 1.00, opacity: 1),
-            Color(.displayP3, red: 0.99, green: 0.97, blue: 0.93, opacity: 1)
+            Color(.displayP3, red: 0.93, green: 0.92, blue: 0.99, opacity: 1),
+            Color(.displayP3, red: 0.98, green: 0.96, blue: 0.91, opacity: 1)
         ],
         startPoint: .topLeading, endPoint: .bottomTrailing
     )
+
+    // MARK: - Surface tokens (light/dark-aware)
+    //
+    // Centralized so the dashboard, the popover, and any future surface stay
+    // consistent. Light mode in particular benefited from explicit values —
+    // `.background.opacity(0.7)` over a near-white page was effectively
+    // invisible, which made cards blend into the gradient.
+
+    /// Solid card background. Pure white in light mode gives a clear edge
+    /// against the tinted page gradient; in dark mode we lean on the dim
+    /// system surface with a touch of translucency so the card still feels
+    /// elevated above the page.
+    static func surfaceCard(dark: Bool) -> Color {
+        dark
+            ? Color(.displayP3, red: 0.13, green: 0.12, blue: 0.17, opacity: 0.85)
+            : Color(.displayP3, red: 1.00, green: 1.00, blue: 1.00, opacity: 1.0)
+    }
+
+    /// Hairline border for cards / chips / inputs. Light mode uses a faint
+    /// near-black — visible enough to draw the edge without becoming a line.
+    /// Dark mode uses a faint white so cards lift off the deep background.
+    static func surfaceBorder(dark: Bool) -> Color {
+        dark
+            ? Color(.displayP3, red: 1.00, green: 1.00, blue: 1.00, opacity: 0.07)
+            : Color(.displayP3, red: 0.16, green: 0.14, blue: 0.30, opacity: 0.10)
+    }
+
+    /// Drop shadow for cards. Tinted with the brand indigo in light mode so
+    /// the shadow reads as "lifted toward the viewer" rather than a flat
+    /// grayscale halo, which gives the layout warmth.
+    static func surfaceShadow(dark: Bool) -> Color {
+        dark
+            ? Color.black.opacity(0.40)
+            : Color(.displayP3, red: 0.27, green: 0.22, blue: 0.55, opacity: 0.10)
+    }
+
+    /// Secondary fill — search field, date chip, circle button, mini chips,
+    /// and "tinted block" containers inside cards. Light mode uses a soft
+    /// lavender that sits visibly above the page gradient but below the
+    /// white card; dark mode uses a slightly elevated charcoal.
+    static func surfaceMuted(dark: Bool) -> Color {
+        dark
+            ? Color(.displayP3, red: 0.18, green: 0.17, blue: 0.22, opacity: 0.85)
+            : Color(.displayP3, red: 0.95, green: 0.94, blue: 0.99, opacity: 1.0)
+    }
+
+    /// Row hover wash. Light mode uses a soft tinted indigo wash so hovered
+    /// rows stand out without inverting; dark mode uses a brighter version
+    /// of the same hue.
+    static func rowHover(dark: Bool) -> Color {
+        dark
+            ? Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 0.16)
+            : Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 0.08)
+    }
 
     static let backgroundGradientDark = LinearGradient(
         colors: [
@@ -199,13 +255,13 @@ struct DashboardCard<Content: View>: View {
         .padding(22)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.background.opacity(scheme == .dark ? 0.45 : 0.75))
+                .fill(DashboardPalette.surfaceCard(dark: scheme == .dark))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.white.opacity(scheme == .dark ? 0.06 : 0.5), lineWidth: 1)
+                .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.06),
-                radius: 12, x: 0, y: 4)
+        .shadow(color: DashboardPalette.surfaceShadow(dark: scheme == .dark),
+                radius: scheme == .dark ? 12 : 18, x: 0, y: scheme == .dark ? 4 : 6)
     }
 }

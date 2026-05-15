@@ -20,6 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Apply the user's theme preference before any window opens so the
+        // appearance is already correct on first paint instead of flashing
+        // from system → user-chosen.
+        _ = ThemeManager.shared
+
         do {
             let url = try SessionStore.defaultDatabaseURL()
             sessionStore = try SessionStore(url: url)

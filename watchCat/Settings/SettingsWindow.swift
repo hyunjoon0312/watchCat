@@ -42,6 +42,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 struct SettingsView: View {
     @StateObject private var permissions = PermissionManager.shared
+    @StateObject private var theme = ThemeManager.shared
     @State private var retentionDays: Int = RetentionSettings.days
     @State private var operationMessage: String?
     @State private var operationIsError: Bool = false
@@ -68,6 +69,13 @@ struct SettingsView: View {
                     get: { permissions.launchAtLoginEnabled },
                     set: { permissions.setLaunchAtLogin($0) }
                 ))
+                .font(.callout)
+
+                HStack {
+                    Text("테마")
+                    Spacer()
+                    ThemePickerRow(selection: $theme.preference)
+                }
                 .font(.callout)
 
                 Divider()
@@ -237,5 +245,57 @@ struct SettingsView: View {
     private func setMessage(_ msg: String, isError: Bool) {
         operationMessage = msg
         operationIsError = isError
+    }
+}
+
+/// Three-icon segmented picker for theme preference. Tapping a tile assigns
+/// the matching `ThemePreference`; the selected tile fills with the brand
+/// accent so the choice reads at a glance.
+private struct ThemePickerRow: View {
+    @Binding var selection: ThemePreference
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(ThemePreference.allCases) { pref in
+                tile(for: pref)
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(scheme == .dark
+                      ? Color(.displayP3, red: 0.18, green: 0.17, blue: 0.22, opacity: 0.85)
+                      : Color(.displayP3, red: 0.95, green: 0.94, blue: 0.99, opacity: 1.0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(scheme == .dark
+                              ? Color.white.opacity(0.07)
+                              : Color.black.opacity(0.08),
+                              lineWidth: 1)
+        )
+    }
+
+    private func tile(for pref: ThemePreference) -> some View {
+        let isSelected = selection == pref
+        let accent = Color(.displayP3, red: 0.43, green: 0.36, blue: 0.96, opacity: 1)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selection = pref
+            }
+        } label: {
+            Image(systemName: pref.iconName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.75))
+                .frame(width: 36, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isSelected ? accent : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(pref.displayName)
+        .onHover { h in if h { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
     }
 }
