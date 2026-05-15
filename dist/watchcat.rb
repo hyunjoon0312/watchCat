@@ -11,6 +11,15 @@ cask "watchcat" do
 
   app "watchCat.app"
 
+  # Strip the quarantine xattr brew slaps onto downloaded apps. Without this,
+  # Gatekeeper would block first launch because watchCat isn't notarized
+  # under an Apple Developer ID. Users see no warning and the app just opens.
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/watchCat.app"],
+                   sudo: false
+  end
+
   zap trash: [
     "~/Library/Application Support/watchCat",
     "~/Library/Preferences/com.dayflow.watchCat.plist",
