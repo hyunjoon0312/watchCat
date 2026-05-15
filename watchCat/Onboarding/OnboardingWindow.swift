@@ -8,6 +8,8 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
 
     func show() {
+        NSApp.setActivationPolicy(.regular)
+
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -37,6 +39,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         Task { @MainActor in
             AppState.shared.hasCompletedOnboarding = true
             self.window = nil
+            NSApp.setActivationPolicy(.accessory)
         }
     }
 }
