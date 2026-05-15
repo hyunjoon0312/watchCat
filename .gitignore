@@ -18,3 +18,4 @@ Packages/
 # Build artifacts
 *.app
 *.dSYM
+build-release/
