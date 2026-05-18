@@ -10,6 +10,9 @@ final class InactivityMonitor {
     static let maxIdleThreshold: TimeInterval = 1800      // 30 min
 
     private let state: RecordingStateController
+    /// "꺼짐" 구간을 영구 저장하기 위한 옵션 종속성. nil이면(=DB 사용 불가)
+    /// 단순히 RecordingStateController만 토글하고 기록은 생략.
+    private let store: SessionStore?
     private var pollTimer: Timer?
     private var sanityTimer: Timer?
     private var lockObservers: [NSObjectProtocol] = []
@@ -17,9 +20,13 @@ final class InactivityMonitor {
 
     private var systemLocked = false
     private var systemAsleep = false
+    /// Currently-open off interval rowid (nil while awake). Used so we close the
+    /// exact row that handleWillSleep opened, not just "the most recent open one".
+    private var openOffIntervalID: Int64?
 
-    init(state: RecordingStateController) {
+    init(state: RecordingStateController, store: SessionStore? = nil) {
         self.state = state
+        self.store = store
         registerObservers()
         startPolling()
     }
@@ -96,11 +103,32 @@ final class InactivityMonitor {
     private func handleWillSleep() {
         systemAsleep = true
         state.systemPause(reason: .sleeping)
+        recordSleepStart()
     }
 
     private func handleDidWake() {
         systemAsleep = false
+        recordSleepEnd()
         if !systemLocked { state.systemResume() }
+    }
+
+    private func recordSleepStart() {
+        guard let store, openOffIntervalID == nil else { return }
+        do {
+            openOffIntervalID = try store.startOffInterval(at: Date())
+        } catch {
+            NSLog("[watchCat] startOffInterval failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func recordSleepEnd() {
+        guard let store, let id = openOffIntervalID else { return }
+        do {
+            try store.endOffInterval(id: id, at: Date())
+        } catch {
+            NSLog("[watchCat] endOffInterval failed: \(error.localizedDescription)")
+        }
+        openOffIntervalID = nil
     }
 
     // MARK: - Idle polling

@@ -130,6 +130,15 @@ final class SessionStore {
                     """, arguments: [cat.id, cat.name, cat.colorHex, cat.sortOrder])
             }
         }
+        migrator.registerMigration("v7_off_intervals") { db in
+            // 맥이 꺼져 있던(슬립/종료) 구간을 별도 테이블로 보존. 활동 갭에서
+            // "꺼짐"만 따로 색·라벨로 표시하기 위함.
+            try db.create(table: OffIntervalRecord.databaseTableName) { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("startAt", .datetime).notNull().indexed()
+                t.column("endAt", .datetime)
+            }
+        }
         try migrator.migrate(dbQueue)
     }
 
@@ -158,6 +167,65 @@ final class SessionStore {
                 sql: "UPDATE \(SessionRecord.databaseTableName) SET endAt = ? WHERE id = ?",
                 arguments: [end, id]
             )
+        }
+    }
+
+    // MARK: - Off intervals (system sleep / shutdown)
+
+    /// 새 "꺼짐" 구간을 시작. NSWorkspace.willSleepNotification 시점에 호출.
+    /// 반환된 id로 wake 이벤트 시 `endOffInterval`을 호출해 닫는다.
+    @discardableResult
+    func startOffInterval(at start: Date) throws -> Int64 {
+        var rec = OffIntervalRecord(id: nil, startAt: start, endAt: nil)
+        try dbQueue.write { db in try rec.insert(db) }
+        return rec.id!
+    }
+
+    func endOffInterval(id: Int64, at end: Date) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE \(OffIntervalRecord.databaseTableName) SET endAt = ? WHERE id = ?",
+                arguments: [end, id]
+            )
+        }
+    }
+
+    /// 앱 시작 시 호출. 부팅 시각을 기준으로 두 가지를 처리한다:
+    ///   1. `endAt IS NULL`인 off interval은 wake 이벤트를 못 받았다는 뜻 →
+    ///      가장 늦은 시각(부팅 시각 vs startAt)으로 닫는다.
+    ///   2. 마지막 session/off의 종료 시각 ~ `bootTime` 사이가 비어 있으면,
+    ///      그 사이 맥이 꺼져 있었던 것이므로 off_interval로 사후 기록한다.
+    /// `bootTime`은 `kern.boottime`에서 얻은 시스템 부팅 시각. nil이면 (2)는 skip.
+    func reconcileOffIntervalsAtLaunch(bootTime: Date?, now: Date = Date()) throws {
+        try dbQueue.write { db in
+            // (1) 강제 종료/충돌로 닫히지 못한 슬립 구간을 정리.
+            try db.execute(sql: """
+                UPDATE \(OffIntervalRecord.databaseTableName)
+                SET endAt = MAX(startAt, ?)
+                WHERE endAt IS NULL
+                """, arguments: [bootTime ?? now])
+
+            guard let bootTime else { return }
+
+            // (2) 마지막 활동/슬립 종료 시각 이후 ~ 부팅 직전 사이를 한 덩어리
+            //     꺼짐 구간으로 기록. 두 테이블 중 가장 최근 종료 시각을 사용.
+            let lastSessionEnd = try Date.fetchOne(db, sql: """
+                SELECT MAX(COALESCE(endAt, startAt))
+                FROM \(SessionRecord.databaseTableName)
+                """)
+            let lastOffEnd = try Date.fetchOne(db, sql: """
+                SELECT MAX(COALESCE(endAt, startAt))
+                FROM \(OffIntervalRecord.databaseTableName)
+                """)
+            let candidates = [lastSessionEnd, lastOffEnd].compactMap { $0 }
+            guard let lastEnd = candidates.max() else { return }
+            // 새 부팅 시각이 마지막 활동 이후 + 충분히 떨어져 있어야 의미있는
+            // 갭. 30초 이내면 잡음(앱 재기동 직전 종료)으로 보고 skip.
+            guard bootTime.timeIntervalSince(lastEnd) > 30 else { return }
+            try db.execute(sql: """
+                INSERT INTO \(OffIntervalRecord.databaseTableName) (startAt, endAt)
+                VALUES (?, ?)
+                """, arguments: [lastEnd, bootTime])
         }
     }
 
@@ -219,6 +287,43 @@ final class SessionStore {
         let span = dayEnd.timeIntervalSince(dayStart)
         guard span > 0 else { return [] }
         // Clip to the day window, drop empties, then merge overlapping.
+        let clipped: [(Double, Double)] = raw.compactMap { (s, e) in
+            let cs = max(s, dayStart)
+            let ce = min(e, dayEnd)
+            guard ce > cs else { return nil }
+            return (cs.timeIntervalSince(dayStart) / span,
+                    ce.timeIntervalSince(dayStart) / span)
+        }
+        .sorted { $0.0 < $1.0 }
+        var merged: [(Double, Double)] = []
+        for iv in clipped {
+            if var last = merged.last, iv.0 <= last.1 {
+                last.1 = max(last.1, iv.1)
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(iv)
+            }
+        }
+        return merged
+    }
+
+    /// `dailyActivityIntervals`의 자매 메서드. `off_intervals` 테이블에 저장된
+    /// 슬립/종료 구간을 같은 [0, 1] fraction 형태로 반환. 활동 인터벌과 함께
+    /// 타임라인에 그려 휴식 영역에서 꺼짐만 분리해 표시한다.
+    func dailyOffIntervals(for date: Date, calendar: Calendar = .current,
+                           asOf: Date = Date()) throws -> [(start: Double, end: Double)] {
+        let dayStart = calendar.startOfDay(for: date)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let raw: [(Date, Date)] = try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT startAt, COALESCE(endAt, ?) AS endAt
+                FROM \(OffIntervalRecord.databaseTableName)
+                WHERE startAt < ? AND COALESCE(endAt, ?) > ?
+                """, arguments: [asOf, dayEnd, asOf, dayStart])
+            return rows.map { (($0["startAt"] as Date), ($0["endAt"] as Date)) }
+        }
+        let span = dayEnd.timeIntervalSince(dayStart)
+        guard span > 0 else { return [] }
         let clipped: [(Double, Double)] = raw.compactMap { (s, e) in
             let cs = max(s, dayStart)
             let ce = min(e, dayEnd)

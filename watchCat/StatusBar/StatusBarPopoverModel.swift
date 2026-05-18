@@ -25,6 +25,8 @@ final class StatusBarPopoverModel: ObservableObject {
     /// Merged active intervals for the current day as fractions of 24h. Drives
     /// the 0–24시 활동/휴식 timeline in the popover header.
     @Published private(set) var todayActivityIntervals: [(start: Double, end: Double)] = []
+    /// 꺼짐 구간(슬립/종료) — 활동 인터벌과 같은 fraction 형식.
+    @Published private(set) var todayOffIntervals: [(start: Double, end: Double)] = []
     @Published private(set) var loadError: String?
 
     let sessionStore: SessionStore?
@@ -68,6 +70,7 @@ final class StatusBarPopoverModel: ObservableObject {
             todayCategoryTotals = []
             todayWebTotals = []
             todayActivityIntervals = []
+            todayOffIntervals = []
             return
         }
         do {
@@ -77,6 +80,7 @@ final class StatusBarPopoverModel: ObservableObject {
             todayWebTotals = try store.webBucketTotals(in: DashboardRange.day(Date()))
             categoryMapping = try store.categoryMapping()
             todayActivityIntervals = try store.dailyActivityIntervals(for: Date())
+            todayOffIntervals = try store.dailyOffIntervals(for: Date())
             loadError = nil
         } catch {
             loadError = "오늘 데이터 로드 실패"

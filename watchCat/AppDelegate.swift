@@ -40,6 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch {
                     NSLog("[watchCat] retention prune failed: \(error.localizedDescription)")
                 }
+                // 마지막 활동 이후 ~ 시스템 부팅 시각 사이를 "꺼짐"으로 사후
+                // 기록. NSWorkspace 알림이 닿지 않는 강제 종료/배터리 방전
+                // 케이스를 잡아내는 유일한 경로.
+                do {
+                    try store.reconcileOffIntervalsAtLaunch(bootTime: SystemBootTime.current())
+                } catch {
+                    NSLog("[watchCat] off-interval reconcile failed: \(error.localizedDescription)")
+                }
             }
         } catch {
             NSLog("[watchCat] SessionStore init failed: \(error.localizedDescription)")
@@ -47,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         SettingsWindowController.shared.sessionStoreProvider = { [weak self] in self?.sessionStore }
         statusBarController = StatusBarController(sessionStore: sessionStore)
-        inactivityMonitor = InactivityMonitor(state: .shared)
+        inactivityMonitor = InactivityMonitor(state: .shared, store: sessionStore)
 
         if let store = sessionStore {
             let tracker = ActiveAppTracker()

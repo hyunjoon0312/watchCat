@@ -39,6 +39,9 @@ struct DashboardView: View {
                             errorBanner(err)
                         }
                         headerCard
+                        if vm.period == .day && vm.totalSeconds > 0 {
+                            dayTimelineCard
+                        }
                         primaryChartCard
                         listsCard
                     }
@@ -116,7 +119,7 @@ struct DashboardView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                TextField("앱 · 도메인 검색", text: $vm.searchText)
+                TextField("앱 · 웹페이지 검색", text: $vm.searchText)
                     .textFieldStyle(.plain)
                     .font(.dbBody)
                     .frame(width: 180)
@@ -312,6 +315,30 @@ struct DashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Day activity timeline card
+
+    /// Activity/rest 24-hour bar — same data the menubar popover uses, but
+    /// rendered taller with a hover tooltip that names the segment under the
+    /// cursor (range + duration). Day mode only.
+    private var dayTimelineCard: some View {
+        DashboardCard(
+            title: "활동 · 휴식 시간",
+            action: AnyView(
+                Text("0시 — 24시")
+                    .font(.dbStatLabel)
+                    .tracking(DashboardTracking.label)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+            )
+        ) {
+            DashboardDayTimeline(
+                intervals: vm.dayActivityIntervals,
+                offIntervals: vm.dayOffIntervals,
+                anchor: vm.range.start
+            )
+        }
     }
 
     // MARK: - Primary chart card
@@ -546,6 +573,347 @@ struct DashboardView: View {
     }
 }
 
+// MARK: - 24-hour activity / rest bar (day mode, dashboard variant)
+
+/// Dashboard-sized activity/rest timeline. Same data shape as the menubar
+/// popover's `DayTimeline`, rendered taller and with a hover tooltip so the
+/// user can read off the exact start/end and duration of any segment without
+/// reaching for the menubar.
+private struct DashboardDayTimeline: View {
+    /// Merged active intervals expressed as `[0, 1]` fractions of the 24-hour
+    /// day. The complement of these is "rest".
+    let intervals: [(start: Double, end: Double)]
+    /// 슬립/종료 구간(꺼짐). 휴식과 시각·라벨이 분리되어 표시된다.
+    let offIntervals: [(start: Double, end: Double)]
+    /// Start-of-day for the date being shown — used so hover labels show wall
+    /// clock times in the user's calendar (e.g. "09:42") rather than fractions.
+    let anchor: Date
+    @Environment(\.colorScheme) private var scheme
+    /// Hover state. Stores both the bar-relative fraction (for positioning the
+    /// tooltip) and the resolved hovered segment (active or rest).
+    @State private var hover: HoverInfo?
+
+    /// 3-hour grid (0, 3, …, 24) — same cadence as the popover. Wider on the
+    /// dashboard, but the visual rhythm matches the popover bar so people who
+    /// learned to read it there have nothing to relearn.
+    private static let tickHours = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+    /// 막대 바깥 컨테이너의 모서리 — 캡슐을 떼고 "약간만" 둥근 사각형으로.
+    private static let barCornerRadius: CGFloat = 4
+    /// 내부 활동/꺼짐 세그먼트의 모서리. 컨테이너보다 약간 더 작게 잡아
+    /// 클립될 때 자연스럽게 라인이 맞도록 함.
+    private static let segmentCornerRadius: CGFloat = 3
+
+    private struct HoverInfo: Equatable {
+        let fraction: Double
+        let kind: SegmentKind
+        let startFrac: Double
+        let endFrac: Double
+    }
+    private enum SegmentKind: Equatable { case active, rest, off }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            legend
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    bar(width: geo.size.width)
+                    // 마우스 위치로 호버 정보를 갱신. 매 픽셀 이동마다 세그먼트
+                    // 룩업을 다시 돌리지만 인터벌은 보통 < 50개라 비용은 무시.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let pt):
+                                let frac = min(1, max(0, pt.x / geo.size.width))
+                                hover = resolveHover(at: frac)
+                            case .ended:
+                                hover = nil
+                            }
+                        }
+                    if let h = hover {
+                        tooltip(for: h, width: geo.size.width)
+                            .offset(x: tooltipX(for: h.fraction, width: geo.size.width),
+                                    y: -54)
+                    }
+                }
+            }
+            .frame(height: 28)
+
+            tickRow
+        }
+    }
+
+    /// The bar itself: rest background, gridlines, active segments, "now" tick.
+    private func bar(width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: Self.barCornerRadius, style: .continuous)
+                .fill(restColor)
+
+            ForEach(Self.tickHours.dropFirst().dropLast(), id: \.self) { h in
+                Rectangle()
+                    .fill(.primary.opacity(scheme == .dark ? 0.18 : 0.10))
+                    .frame(width: 1)
+                    .offset(x: width * Double(h) / 24.0)
+            }
+
+            // 꺼짐 구간을 먼저 그림: 활동 구간이 그 위에 덮이는 일은 거의
+            // 없지만(슬립 중에는 세션이 안 열리므로), 만에 하나 겹치더라도
+            // 활동이 시각적으로 우선이 되도록 순서를 둠. 모서리는 살짝만
+            // 둥글려 "막대"라는 느낌(캡슐의 알약 형태가 아닌)을 유지.
+            ForEach(offIntervals.indices, id: \.self) { idx in
+                let iv = offIntervals[idx]
+                let w = max(2, width * (iv.end - iv.start))
+                RoundedRectangle(cornerRadius: Self.segmentCornerRadius, style: .continuous)
+                    .fill(offColor)
+                    .frame(width: w)
+                    .offset(x: width * iv.start)
+            }
+
+            ForEach(intervals.indices, id: \.self) { idx in
+                let iv = intervals[idx]
+                let w = max(2, width * (iv.end - iv.start))
+                RoundedRectangle(cornerRadius: Self.segmentCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(colors: [activeStart, activeEnd],
+                                       startPoint: .leading, endPoint: .trailing)
+                    )
+                    .frame(width: w)
+                    .offset(x: width * iv.start)
+            }
+
+            // 미래 영역(아직 오지 않은 시각)을 옅게 덮어 "휴식과 다르다"는
+            // 신호를 시각적으로도 줌. 캡슐 모양으로 클립되도록 ZStack 전체에
+            // .clipShape(Capsule())을 마지막에 적용.
+            if isToday && nowFraction < 1 {
+                Rectangle()
+                    .fill(scheme == .dark
+                          ? Color.black.opacity(0.45)
+                          : Color.white.opacity(0.62))
+                    .frame(width: max(0, width * (1 - nowFraction)))
+                    .offset(x: width * nowFraction)
+            }
+
+            if isToday {
+                Rectangle()
+                    .fill(.primary.opacity(0.85))
+                    .frame(width: 1.5)
+                    .offset(x: width * nowFraction)
+            }
+
+            if let h = hover {
+                Rectangle()
+                    .fill(.primary.opacity(0.55))
+                    .frame(width: 1)
+                    .offset(x: width * h.fraction)
+            }
+        }
+        .frame(height: 28)
+        .clipShape(RoundedRectangle(cornerRadius: Self.barCornerRadius, style: .continuous))
+    }
+
+    private var tickRow: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                ForEach(Self.tickHours, id: \.self) { h in
+                    Text("\(h)")
+                        .font(.dbCaptionSmall)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .offset(x: tickX(for: h, totalWidth: geo.size.width, label: "\(h)"))
+                }
+            }
+        }
+        .frame(height: 14)
+    }
+
+    private var legend: some View {
+        let activeSeconds = intervals.reduce(0.0) { $0 + ($1.end - $1.start) } * 86400
+        let offSeconds = offIntervals.reduce(0.0) { $0 + ($1.end - $1.start) } * 86400
+        // 오늘이라면 "아직 지나지 않은 시간"을 휴식에 포함하지 않음. 휴식은
+        // (지나간 시간 − 활동 − 꺼짐)으로 정의해서 세 합계의 합이 elapsed와
+        // 일치하도록 한다.
+        let elapsedSeconds = elapsedFraction * 86400
+        let restSeconds = max(0, elapsedSeconds - activeSeconds - offSeconds)
+        return HStack(spacing: 18) {
+            legendItem(color: activeStart, label: "활동", seconds: activeSeconds)
+            legendItem(color: restColor, label: "휴식", seconds: restSeconds)
+            legendItem(color: offColor, label: "꺼짐", seconds: offSeconds)
+            Spacer()
+            Text("막대 위로 마우스를 올리면 세부 정보 표시")
+                .font(.dbCaptionSmall)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func legendItem(color: Color, label: String, seconds: TimeInterval) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(color)
+                .frame(width: 12, height: 12)
+            Text(label)
+                .font(.dbBody)
+                .foregroundStyle(.primary)
+            Text(TimeFormatting.longHMS(seconds))
+                .font(.dbBody)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Tooltip card. Two lines: the time range covered by the segment plus its
+    /// duration. Kept compact so it doesn't obscure neighbouring segments at
+    /// pixel-level precision.
+    private func tooltip(for h: HoverInfo, width: CGFloat) -> some View {
+        let startDate = anchor.addingTimeInterval(h.startFrac * 86400)
+        let endDate = anchor.addingTimeInterval(h.endFrac * 86400)
+        let duration = (h.endFrac - h.startFrac) * 86400
+        let title: String = {
+            switch h.kind {
+            case .active: return "활동"
+            case .rest:   return "휴식"
+            case .off:    return "꺼짐"
+            }
+        }()
+        let tint: Color = {
+            switch h.kind {
+            case .active: return activeStart
+            case .rest:   return restAccent
+            case .off:    return offColor
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(title)
+                    .font(.dbStatLabel)
+                    .foregroundStyle(.primary)
+                Text(TimeFormatting.longHMS(duration))
+                    .font(.dbStatLabel)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Text("\(clockLabel(startDate)) ~ \(clockLabel(endDate))")
+                .font(.dbCaptionSmall)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(DashboardPalette.surfaceCard(dark: scheme == .dark))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
+        )
+        .shadow(color: DashboardPalette.surfaceShadow(dark: scheme == .dark),
+                radius: 6, x: 0, y: 3)
+        .allowsHitTesting(false)
+    }
+
+    /// Find the active segment that contains `frac`. If none does, fall back to
+    /// describing the surrounding rest gap so the tooltip is informative across
+    /// the entire bar (not just over filled regions). Returns nil over the
+    /// "not yet" region of today — that area isn't a real rest period.
+    private func resolveHover(at frac: Double) -> HoverInfo? {
+        if frac > elapsedFraction { return nil }
+        // 우선순위: 활동 > 꺼짐 > 휴식. 활동과 꺼짐은 거의 겹치지 않지만 만에
+        // 하나 겹쳤을 때 사용자에게 더 중요한 정보(=활동)를 우선 표시.
+        for iv in intervals where iv.start <= frac && frac <= iv.end {
+            return HoverInfo(fraction: frac, kind: .active,
+                             startFrac: iv.start, endFrac: iv.end)
+        }
+        for iv in offIntervals where iv.start <= frac && frac <= iv.end {
+            return HoverInfo(fraction: frac, kind: .off,
+                             startFrac: iv.start, endFrac: iv.end)
+        }
+        // 휴식 구간 = 그 외. 활동/꺼짐 인터벌의 합집합 바깥 경계를 찾아 구간을
+        // 좁힌다. upper는 미래 영역(elapsedFraction)으로도 잘림.
+        var lower = 0.0
+        var upper = elapsedFraction
+        let edges = (intervals + offIntervals).sorted { $0.start < $1.start }
+        for iv in edges {
+            if iv.end <= frac { lower = max(lower, iv.end) }
+            if iv.start >= frac { upper = min(upper, iv.start); break }
+        }
+        return HoverInfo(fraction: frac, kind: .rest,
+                         startFrac: lower, endFrac: upper)
+    }
+
+    /// Clamp the tooltip so it doesn't overflow the card edges. ~200pt wide
+    /// is the maximum we ever need for "활동 · 1시간 23분 / 09:42 ~ 11:05".
+    private func tooltipX(for frac: Double, width: CGFloat) -> CGFloat {
+        let approx: CGFloat = 200
+        let raw = width * frac - approx / 2
+        return max(0, min(width - approx, raw))
+    }
+
+    private func tickX(for hour: Int, totalWidth: CGFloat, label: String) -> CGFloat {
+        let frac = CGFloat(hour) / 24.0
+        let approxWidth: CGFloat = label.count <= 1 ? 8 : 14
+        let centered = totalWidth * frac - approxWidth / 2
+        if hour == 0 { return 0 }
+        if hour == 24 { return totalWidth - approxWidth }
+        return centered
+    }
+
+    private func clockLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }
+
+    private var activeStart: Color {
+        Color(.displayP3, red: 0.49, green: 0.42, blue: 0.99, opacity: 1)
+    }
+    private var activeEnd: Color {
+        Color(.displayP3, red: 0.37, green: 0.30, blue: 0.92, opacity: 1)
+    }
+    /// 휴식: 활동(인디고)과 명도가 충분히 다르고 꺼짐과도 한눈에 갈리도록
+    /// 라이트는 아주 밝은 라벤더 그레이, 다크는 중간 회색으로 잡았다.
+    private var restColor: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.42, green: 0.40, blue: 0.46, opacity: 1)
+            : Color(.displayP3, red: 0.90, green: 0.88, blue: 0.93, opacity: 1)
+    }
+    /// 꺼짐: 휴식과의 명도 차를 크게 벌려 막대에서 즉시 구분되도록 함. 라이트
+    /// 모드에서는 짙은 슬레이트(거의 차콜)로, 다크 모드에서는 활동(인디고)과
+    /// 헷갈리지 않게 푸른빛이 거의 없는 거의 검정에 가까운 회색으로.
+    private var offColor: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.08, green: 0.08, blue: 0.10, opacity: 1)
+            : Color(.displayP3, red: 0.26, green: 0.25, blue: 0.30, opacity: 1)
+    }
+    /// Slightly more saturated dot for the rest tooltip — the bar itself uses
+    /// a quiet neutral, but a tiny dot in the popover needs to be visible.
+    private var restAccent: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.55, green: 0.53, blue: 0.60, opacity: 1)
+            : Color(.displayP3, red: 0.62, green: 0.60, blue: 0.66, opacity: 1)
+    }
+
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(anchor)
+    }
+
+    /// "지금까지 흘러간 시간"의 0–1 비율. 과거 날짜는 1.0(24시간 모두 흐름),
+    /// 오늘이면 자정부터 현재까지의 비율. 휴식 합계와 호버 가능한 영역의 상한
+    /// 둘 다 이 값을 기준으로 계산해, 미래 시간이 휴식으로 둔갑하지 않음.
+    private var elapsedFraction: Double {
+        isToday ? nowFraction : 1.0
+    }
+
+    private var nowFraction: Double {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return 0 }
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return 0 }
+        return min(1, max(0, Date().timeIntervalSince(start) / span))
+    }
+}
+
 // MARK: - 24-hour timeline chart (day mode)
 
 /// 24 bars (0..23) with the peak hour highlighted in the brand color. This is
@@ -554,6 +922,12 @@ struct DashboardView: View {
 private struct HourlyTimelineChart: View {
     let series: [DailySeriesPoint]
     let peakHour: Int?
+    /// Index (0–23) of the hour the user is currently hovering over. Used to
+    /// surface per-hour minute counts that aren't visible in the bare bar chart
+    /// — before this, only the peak hour had a number above it, so all other
+    /// bars were "guess the height" reads.
+    @State private var hoveredHour: Int?
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Chart {
@@ -562,17 +936,10 @@ private struct HourlyTimelineChart: View {
                     x: .value("hour", idx),
                     y: .value("minutes", point.seconds / 60.0)
                 )
-                .foregroundStyle(
-                    idx == peakHour ? DashboardPalette.highlight : DashboardPalette.accent
-                )
+                .foregroundStyle(barColor(idx: idx))
                 .cornerRadius(4)
                 .annotation(position: .top) {
-                    if idx == peakHour && point.seconds > 0 {
-                        Text(TimeFormatting.longHMS(point.seconds))
-                            .font(.dbCaptionSmall)
-                            .monospacedDigit()
-                            .foregroundStyle(DashboardPalette.highlight)
-                    }
+                    annotation(for: idx, point: point)
                 }
             }
         }
@@ -604,6 +971,101 @@ private struct HourlyTimelineChart: View {
             }
         }
         .chartPlotStyle { plot in plot.padding(.top, 8) }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let pt):
+                            // chartOverlay covers the whole chart, including the
+                            // y-axis gutter. Translate to plot-area coords first,
+                            // then ask the chart proxy for the value at that x.
+                            let origin = geo[proxy.plotAreaFrame].origin
+                            let local = CGPoint(x: pt.x - origin.x, y: pt.y - origin.y)
+                            if let raw: Double = proxy.value(atX: local.x) {
+                                let idx = Int(raw.rounded())
+                                // 빈 시간대(0초)에 호버하면 피크 라벨이 사라져
+                                // 플롯 상단 여유가 바뀌면서 y축이 흔들리는 듯
+                                // 보였음. 데이터가 있는 시간대만 호버 상태로
+                                // 잡아서, 피크 annotation 위치가 유지되도록 함.
+                                if (0...23).contains(idx),
+                                   idx < series.count,
+                                   series[idx].seconds > 0 {
+                                    hoveredHour = idx
+                                } else {
+                                    hoveredHour = nil
+                                }
+                            } else {
+                                hoveredHour = nil
+                            }
+                        case .ended:
+                            hoveredHour = nil
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Highlight the peak hour (gold) and the hovered hour (deeper accent), so
+    /// the eye tracks the cursor's column as the user scans the bar chart.
+    private func barColor(idx: Int) -> Color {
+        if idx == hoveredHour {
+            return DashboardPalette.accent
+        }
+        if idx == peakHour {
+            return DashboardPalette.highlight
+        }
+        return DashboardPalette.accent.opacity(0.78)
+    }
+
+    /// Label rules: hovered hour wins (shows precise duration), peak hour as
+    /// fallback. Other hours stay unlabeled to avoid axis clutter — the bar
+    /// height plus the y-axis still gives an approximate read.
+    @ViewBuilder
+    private func annotation(for idx: Int, point: DailySeriesPoint) -> some View {
+        if idx == hoveredHour && point.seconds > 0 {
+            HourBadge(hour: idx, seconds: point.seconds,
+                      tint: DashboardPalette.accent,
+                      isHover: true)
+        } else if idx == peakHour && hoveredHour == nil && point.seconds > 0 {
+            HourBadge(hour: idx, seconds: point.seconds,
+                      tint: DashboardPalette.highlight,
+                      isHover: false)
+        }
+    }
+}
+
+/// Floating label that surfaces "Nh Mm at HHh" for the hovered or peak bar.
+/// Pulled out so the hover and peak presentations share styling — earlier they
+/// drifted apart (peak was plain text, hover was a chip) and looked unrelated.
+private struct HourBadge: View {
+    let hour: Int
+    let seconds: TimeInterval
+    let tint: Color
+    let isHover: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("\(hour)시")
+                .font(.dbCaptionSmall)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Text(TimeFormatting.longHMS(seconds))
+                .font(.dbCaptionSmall)
+                .monospacedDigit()
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, isHover ? 7 : 0)
+        .padding(.vertical, isHover ? 2 : 0)
+        .background(
+            Group {
+                if isHover {
+                    Capsule().fill(tint.opacity(0.14))
+                }
+            }
+        )
     }
 }
 

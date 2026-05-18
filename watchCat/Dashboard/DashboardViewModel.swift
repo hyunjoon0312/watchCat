@@ -42,6 +42,13 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var webByBrowser: [String: [WebBucketTotal]] = [:]
     @Published private(set) var dailySeries: [DailySeriesPoint] = []
     @Published private(set) var hourlySeries: [DailySeriesPoint] = []
+    /// Merged active intervals for the selected day as fractions of 24h.
+    /// Populated only in `.day` period; empty otherwise. Mirrors the menubar
+    /// popover's timeline so the dashboard can show the same activity/rest bar.
+    @Published private(set) var dayActivityIntervals: [(start: Double, end: Double)] = []
+    /// "꺼짐"(슬립/종료) 구간. 활동 구간 외에서도 휴식과 꺼짐을 시각·라벨로
+    /// 분리하기 위함. day 모드에서만 채워짐.
+    @Published private(set) var dayOffIntervals: [(start: Double, end: Double)] = []
     @Published private(set) var topAppSeries: [AppDailySeries] = []
     @Published private(set) var heatmap: [HeatmapCell] = []
     @Published private(set) var categoryMapping: [String: AppCategory] = [:]
@@ -117,6 +124,8 @@ final class DashboardViewModel: ObservableObject {
         guard let store else {
             appTotals = []; categoryTotals = []; webTotals = []
             dailySeries = []; topAppSeries = []; heatmap = []
+            dayActivityIntervals = []
+            dayOffIntervals = []
             loadError = "DB 사용 불가 — 권한 또는 디스크 접근 문제일 수 있습니다."
             return
         }
@@ -139,6 +148,12 @@ final class DashboardViewModel: ObservableObject {
             self.hourlySeries = try store.hourlyTotals(in: r, calendar: calendar, asOf: now)
             self.topAppSeries = try store.topAppDailySeries(in: r, limit: 5, asOf: now)
             self.heatmap = try store.hourWeekdayHeatmap(in: r, calendar: calendar, asOf: now)
+            self.dayActivityIntervals = period == .day
+                ? try store.dailyActivityIntervals(for: r.start, calendar: calendar, asOf: now)
+                : []
+            self.dayOffIntervals = period == .day
+                ? try store.dailyOffIntervals(for: r.start, calendar: calendar, asOf: now)
+                : []
             let prev = DashboardRange.shift(r, period: period, by: -1, calendar: calendar)
             self.previousTotalSeconds = try store.totalSeconds(in: prev, asOf: now)
             self.loadError = nil

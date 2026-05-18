@@ -88,7 +88,8 @@ private struct MainScreen: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             statusPill
-            DayTimeline(intervals: model.todayActivityIntervals)
+            DayTimeline(intervals: model.todayActivityIntervals,
+                        offIntervals: model.todayOffIntervals)
             if model.permissionDenied { permissionBanner }
             summaryBlock
             Divider().opacity(0.4)
@@ -291,22 +292,27 @@ private struct MainScreen: View {
 /// rest period. The vertical "now" marker shows where we are in the day.
 private struct DayTimeline: View {
     let intervals: [(start: Double, end: Double)]
+    /// 꺼짐 구간(슬립/종료). 휴식과 색·라벨이 분리된다.
+    let offIntervals: [(start: Double, end: Double)]
     @Environment(\.colorScheme) private var scheme
 
     /// Hours marked under the bar. 3-hour grid (0, 3, 6, …, 24) — fine enough
     /// to read the morning/afternoon split, coarse enough that labels don't
     /// crowd at popover width (360pt).
     private static let tickHours = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+    /// 막대 컨테이너 모서리. 메뉴바는 막대 높이가 14pt로 작아서 대시보드보다
+    /// 살짝 더 작은 반지름.
+    private static let barCornerRadius: CGFloat = 3
+    private static let segmentCornerRadius: CGFloat = 2
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             legend
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    // Rest background — a warm-tinted neutral so the visible
-                    // "rest" portions read as a distinct color rather than a
-                    // washed-out version of the surrounding surface.
-                    Capsule()
+                    // Rest background — 살짝만 둥근 모서리. 캡슐(알약) 모양은
+                    // 시각적으로 부드럽지만 "시간 막대"라는 느낌이 약했음.
+                    RoundedRectangle(cornerRadius: Self.barCornerRadius, style: .continuous)
                         .fill(restColor)
 
                     // 3-hour gridlines drawn faintly across the bar.
@@ -317,10 +323,19 @@ private struct DayTimeline: View {
                             .offset(x: geo.size.width * Double(h) / 24.0)
                     }
 
+                    ForEach(offIntervals.indices, id: \.self) { idx in
+                        let iv = offIntervals[idx]
+                        let width = max(2, geo.size.width * (iv.end - iv.start))
+                        RoundedRectangle(cornerRadius: Self.segmentCornerRadius, style: .continuous)
+                            .fill(offColor)
+                            .frame(width: width)
+                            .offset(x: geo.size.width * iv.start)
+                    }
+
                     ForEach(intervals.indices, id: \.self) { idx in
                         let iv = intervals[idx]
                         let width = max(2, geo.size.width * (iv.end - iv.start))
-                        Capsule()
+                        RoundedRectangle(cornerRadius: Self.segmentCornerRadius, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [activeStart, activeEnd],
@@ -331,12 +346,24 @@ private struct DayTimeline: View {
                             .offset(x: geo.size.width * iv.start)
                     }
 
+                    // 아직 오지 않은 시간 — 휴식이 아니라 "비어있음"을 옅게
+                    // 표시. 대시보드 카드와 같은 처리.
+                    if nowFraction < 1 {
+                        Rectangle()
+                            .fill(scheme == .dark
+                                  ? Color.black.opacity(0.45)
+                                  : Color.white.opacity(0.62))
+                            .frame(width: max(0, geo.size.width * (1 - nowFraction)))
+                            .offset(x: geo.size.width * nowFraction)
+                    }
+
                     // "Now" tick.
                     Rectangle()
                         .fill(.primary.opacity(0.85))
                         .frame(width: 1.5)
                         .offset(x: geo.size.width * nowFraction)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: Self.barCornerRadius, style: .continuous))
             }
             .frame(height: 14)
 
@@ -357,10 +384,14 @@ private struct DayTimeline: View {
     /// 5h 23m / rested 18h 37m" without parsing widths.
     private var legend: some View {
         let activeSeconds = intervals.reduce(0.0) { $0 + ($1.end - $1.start) } * 86400
-        let restSeconds = max(0, 86400 - activeSeconds)
-        return HStack(spacing: 12) {
+        let offSeconds = offIntervals.reduce(0.0) { $0 + ($1.end - $1.start) } * 86400
+        // 아직 흘러가지 않은 미래 시간은 휴식에 포함하지 않음. 휴식 = 지나간
+        // 시간 − 활동 − 꺼짐.
+        let restSeconds = max(0, nowFraction * 86400 - activeSeconds - offSeconds)
+        return HStack(spacing: 10) {
             legendItem(color: activeStart, label: "활동", seconds: activeSeconds)
             legendItem(color: restColor, label: "휴식", seconds: restSeconds)
+            legendItem(color: offColor, label: "꺼짐", seconds: offSeconds)
             Spacer()
         }
     }
@@ -408,12 +439,19 @@ private struct DayTimeline: View {
         Color(.displayP3, red: 0.37, green: 0.30, blue: 0.92, opacity: 1)
     }
 
-    /// Rest = a warm sand/charcoal tint that contrasts with the indigo active
-    /// and reads as "different from background" in both light and dark mode.
+    /// 휴식: 활동(인디고)과 명도가 충분히 다르고 꺼짐과도 즉시 갈리는 톤.
+    /// 라이트는 아주 밝은 라벤더 그레이, 다크는 중간 회색.
     private var restColor: Color {
         scheme == .dark
-            ? Color(.displayP3, red: 0.32, green: 0.30, blue: 0.36, opacity: 1)
-            : Color(.displayP3, red: 0.86, green: 0.84, blue: 0.88, opacity: 1)
+            ? Color(.displayP3, red: 0.42, green: 0.40, blue: 0.46, opacity: 1)
+            : Color(.displayP3, red: 0.90, green: 0.88, blue: 0.93, opacity: 1)
+    }
+    /// 꺼짐: 휴식과의 명도 차를 크게 벌려 한눈에 구분되도록. 라이트는 짙은
+    /// 슬레이트, 다크는 거의 검정에 가까운 톤.
+    private var offColor: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.08, green: 0.08, blue: 0.10, opacity: 1)
+            : Color(.displayP3, red: 0.26, green: 0.25, blue: 0.30, opacity: 1)
     }
 
     private var nowFraction: Double {
