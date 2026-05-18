@@ -45,6 +45,22 @@ final class PermissionManager: ObservableObject {
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     }
 
+    /// watchCat이 기본 동작에 필요한 핵심 권한(접근성·화면 기록)이 부여돼
+    /// 있는지. brew 업그레이드 직후 ad-hoc 서명 cdhash가 바뀌면 TCC가 같은
+    /// 앱으로 못 알아봐 false로 떨어진다 — 이때 배너로 사용자에게 재인증을
+    /// 안내한다.
+    var needsCoreReauth: Bool {
+        let a = states[.accessibility] ?? false
+        let s = states[.screenRecording] ?? false
+        return !(a && s)
+    }
+
+    /// 재인증이 필요한 핵심 권한만 추려 반환. 가이드 시트에서 "어떤 항목을
+    /// 다시 켜야 하는지" 사용자에게 정확히 알려주기 위함.
+    var missingCorePermissions: [PermissionKind] {
+        [.accessibility, .screenRecording].filter { states[$0] != true }
+    }
+
     func request(_ kind: PermissionKind) {
         switch kind {
         case .accessibility:

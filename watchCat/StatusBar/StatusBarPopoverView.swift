@@ -88,6 +88,11 @@ private struct MainScreen: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             statusPill
+            // brew 업그레이드 직후 ad-hoc 서명 cdhash 변경으로 접근성/화면
+            // 기록 권한이 무효화된 경우를 가장 먼저 노출 — 활동 막대가
+            // 비어 보이는 진짜 원인을 사용자에게 알려준다.
+            PermissionReauthBanner(manager: PermissionManager.shared,
+                                   density: .compact)
             DayTimeline(intervals: model.todayActivityIntervals,
                         offIntervals: model.todayOffIntervals)
             if model.permissionDenied { permissionBanner }

@@ -38,6 +38,10 @@ struct DashboardView: View {
                         if let err = vm.loadError {
                             errorBanner(err)
                         }
+                        // 업그레이드 후 권한이 무효화돼 데이터가 멈춰 보이는
+                        // 경우를 가장 위에서 안내. needsCoreReauth=false면 배너
+                        // 자체가 사라져 평소엔 보이지 않는다.
+                        PermissionReauthBanner(manager: PermissionManager.shared)
                         headerCard
                         if vm.period == .day && vm.totalSeconds > 0 {
                             dayTimelineCard
