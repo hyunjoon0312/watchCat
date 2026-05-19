@@ -46,6 +46,10 @@ struct DashboardView: View {
                         if vm.period == .day && vm.totalSeconds > 0 {
                             dayTimelineCard
                         }
+                        if vm.period == .day,
+                           vm.firstBreakInsight != nil || vm.longestSpanInsight != nil {
+                            dayRhythmCard
+                        }
                         primaryChartCard
                         listsCard
                     }
@@ -345,6 +349,92 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: - Day rhythm card
+
+    /// Two-stat insight card shown in day mode: 첫 휴식까지 + 최장 연속 집중.
+    /// Both stats compare against a 14-day baseline so the user can see how
+    /// the day's rhythm differs from "평소" — a single big number alone has no
+    /// reference point and gets ignored after a few views.
+    private var dayRhythmCard: some View {
+        DashboardCard(title: "오늘의 리듬") {
+            HStack(alignment: .top, spacing: 28) {
+                if let insight = vm.firstBreakInsight {
+                    rhythmStat(
+                        icon: "cup.and.saucer.fill",
+                        tint: DashboardPalette.accent,
+                        label: "첫 휴식까지",
+                        seconds: insight.seconds,
+                        baselineSeconds: insight.baselineSeconds,
+                        spanStart: insight.span.start,
+                        spanEnd: insight.span.end
+                    )
+                }
+                if let insight = vm.longestSpanInsight {
+                    rhythmStat(
+                        icon: "bolt.fill",
+                        tint: DashboardPalette.highlight,
+                        label: "최장 연속 집중",
+                        seconds: insight.seconds,
+                        baselineSeconds: insight.baselineSeconds,
+                        spanStart: insight.span.start,
+                        spanEnd: insight.span.end
+                    )
+                }
+            }
+        }
+    }
+
+    private func rhythmStat(icon: String, tint: Color, label: String,
+                            seconds: TimeInterval, baselineSeconds: TimeInterval?,
+                            spanStart: Date, spanEnd: Date) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(tint.opacity(0.16)))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label)
+                    .font(.dbStatLabel)
+                    .tracking(DashboardTracking.label)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Text(TimeFormatting.longHMS(seconds))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                if let baselineSeconds {
+                    baselineChip(currentSeconds: seconds, baseline: baselineSeconds)
+                }
+                Text(timeRangeLabel(start: spanStart, end: spanEnd))
+                    .font(.dbCaption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Neutral accent (not green/red): "longer vs shorter"의 가치 평가가 메트릭마다
+    // 달라서 색으로 좋고 나쁨을 단정하지 않는다.
+    private func baselineChip(currentSeconds: TimeInterval, baseline: TimeInterval) -> some View {
+        let diff = currentSeconds - baseline
+        let sign = diff >= 0 ? "+" : "−"
+        let minutes = Int(abs(diff).rounded() / 60)
+        let label = "평소보다 \(sign)\(minutes)분 · 평소 \(TimeFormatting.longHMS(baseline))"
+        return Text(label)
+            .font(.dbCaptionSmall)
+            .foregroundStyle(DashboardPalette.accent)
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .background(Capsule().fill(DashboardPalette.accentSoft))
+    }
+
+    private func timeRangeLabel(start: Date, end: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "ko_KR")
+        fmt.dateFormat = "HH:mm"
+        return "\(fmt.string(from: start)) — \(fmt.string(from: end))"
+    }
+
     // MARK: - Primary chart card
 
     /// Single card slot that hosts whichever chart is right for the period.
@@ -352,7 +442,7 @@ struct DashboardView: View {
     /// content height to leap and reflow everything below.
     private var primaryChartCard: some View {
         DashboardCard(
-            title: vm.period == .day ? "오늘의 시간대별 활성도" : "기간 추이",
+            title: vm.period == .day ? "누적 활성도 — 전날 비교" : "기간 추이",
             action: AnyView(
                 Text(chartLegend)
                     .font(.dbStatLabel)
@@ -366,8 +456,12 @@ struct DashboardView: View {
                            icon: "moon.zzz")
                     .frame(height: 220)
             } else if vm.period == .day {
-                HourlyTimelineChart(series: vm.hourlySeries, peakHour: vm.peakHour)
-                    .frame(height: 240)
+                CumulativeComparisonChart(
+                    today: vm.selectedDayCumulative,
+                    prior: vm.priorDayCumulative,
+                    isSelectedDayToday: Calendar.current.isDateInToday(vm.range.start)
+                )
+                .frame(height: 240)
             } else {
                 DailySeriesBarChart(series: vm.dailySeries, period: vm.period)
                     .frame(height: 240)
@@ -918,43 +1012,68 @@ private struct DashboardDayTimeline: View {
     }
 }
 
-// MARK: - 24-hour timeline chart (day mode)
+// MARK: - Cumulative comparison chart (day mode)
 
-/// 24 bars (0..23) with the peak hour highlighted in the brand color. This is
-/// the centerpiece for day-mode viewing — much easier to read than a 7×24 heatmap
-/// for a single day.
-private struct HourlyTimelineChart: View {
-    let series: [DailySeriesPoint]
-    let peakHour: Int?
-    /// Index (0–23) of the hour the user is currently hovering over. Used to
-    /// surface per-hour minute counts that aren't visible in the bare bar chart
-    /// — before this, only the peak hour had a number above it, so all other
-    /// bars were "guess the height" reads.
-    @State private var hoveredHour: Int?
+/// Cumulative active-time curve for the selected day, with the prior day
+/// overlaid as a dashed line. The reason for cumulative over hourly bars:
+/// pace comparison ("어제 같은 시각보다 +37분") becomes a vertical-distance
+/// read between two curves, which is easier to scan than comparing 24 bar
+/// heights side by side. The hourly distribution information is still
+/// available via the activity-timeline card above.
+private struct CumulativeComparisonChart: View {
+    let today: [CumulativeMinutePoint]
+    let prior: [CumulativeMinutePoint]
+    /// Whether the *selected* day equals the calendar today — controls the
+    /// "지금" marker and decides where the live-comparison hover defaults to.
+    let isSelectedDayToday: Bool
+
+    @State private var hoveredMinute: Int?
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Chart {
-            ForEach(Array(series.enumerated()), id: \.offset) { idx, point in
-                BarMark(
-                    x: .value("hour", idx),
-                    y: .value("minutes", point.seconds / 60.0)
+            ForEach(prior, id: \.minute) { p in
+                LineMark(
+                    x: .value("minute", p.minute),
+                    y: .value("minutes", p.seconds / 60.0),
+                    series: .value("series", "prior")
                 )
-                .foregroundStyle(barColor(idx: idx))
-                .cornerRadius(4)
-                .annotation(position: .top) {
-                    annotation(for: idx, point: point)
-                }
+                .foregroundStyle(priorColor)
+                .lineStyle(StrokeStyle(lineWidth: 1.6, dash: [4, 4]))
+                .interpolationMethod(.monotone)
+            }
+            ForEach(today, id: \.minute) { p in
+                LineMark(
+                    x: .value("minute", p.minute),
+                    y: .value("minutes", p.seconds / 60.0),
+                    series: .value("series", "today")
+                )
+                .foregroundStyle(DashboardPalette.accent)
+                .lineStyle(StrokeStyle(lineWidth: 2.4))
+                .interpolationMethod(.monotone)
+            }
+            if isSelectedDayToday, let last = today.last {
+                RuleMark(x: .value("minute", last.minute))
+                    .foregroundStyle(.secondary.opacity(0.25))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+            }
+            if let hover = hoveredMinute {
+                RuleMark(x: .value("minute", hover))
+                    .foregroundStyle(.secondary.opacity(0.4))
+                    .annotation(position: .top, alignment: .leading,
+                                spacing: 4, overflowResolution: .init(x: .fit, y: .disabled)) {
+                        hoverBadge(minute: hover)
+                    }
             }
         }
-        .chartXScale(domain: -0.5...23.5)
+        .chartXScale(domain: 0...1440)
         .chartXAxis {
-            AxisMarks(values: [0, 6, 12, 18, 23]) { value in
+            AxisMarks(values: [0, 360, 720, 1080, 1440]) { value in
                 AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
                 AxisTick().foregroundStyle(.secondary.opacity(0.3))
                 AxisValueLabel {
-                    if let h = value.as(Int.self) {
-                        Text("\(h)시")
+                    if let m = value.as(Int.self) {
+                        Text(hourLabel(forMinute: m))
                             .font(.dbCaptionSmall)
                             .foregroundStyle(.secondary)
                     }
@@ -974,7 +1093,7 @@ private struct HourlyTimelineChart: View {
                 }
             }
         }
-        .chartPlotStyle { plot in plot.padding(.top, 8) }
+        .chartPlotStyle { plot in plot.padding(.top, 32) }
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle()
@@ -983,93 +1102,116 @@ private struct HourlyTimelineChart: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let pt):
-                            // chartOverlay covers the whole chart, including the
-                            // y-axis gutter. Translate to plot-area coords first,
-                            // then ask the chart proxy for the value at that x.
                             let origin = geo[proxy.plotAreaFrame].origin
                             let local = CGPoint(x: pt.x - origin.x, y: pt.y - origin.y)
                             if let raw: Double = proxy.value(atX: local.x) {
-                                let idx = Int(raw.rounded())
-                                // 빈 시간대(0초)에 호버하면 피크 라벨이 사라져
-                                // 플롯 상단 여유가 바뀌면서 y축이 흔들리는 듯
-                                // 보였음. 데이터가 있는 시간대만 호버 상태로
-                                // 잡아서, 피크 annotation 위치가 유지되도록 함.
-                                if (0...23).contains(idx),
-                                   idx < series.count,
-                                   series[idx].seconds > 0 {
-                                    hoveredHour = idx
-                                } else {
-                                    hoveredHour = nil
-                                }
+                                hoveredMinute = max(0, min(1440, Int(raw.rounded())))
                             } else {
-                                hoveredHour = nil
+                                hoveredMinute = nil
                             }
                         case .ended:
-                            hoveredHour = nil
+                            hoveredMinute = nil
                         }
                     }
             }
         }
+        .chartLegend(.hidden)
+        .overlay(alignment: .topTrailing) { legendChip }
     }
 
-    /// Highlight the peak hour (gold) and the hovered hour (deeper accent), so
-    /// the eye tracks the cursor's column as the user scans the bar chart.
-    private func barColor(idx: Int) -> Color {
-        if idx == hoveredHour {
-            return DashboardPalette.accent
+    /// Lookup helper: cumulative seconds at `minute` from a sampled series.
+    /// Returns the last sample at or before `minute`. Series are short (~288
+    /// points), so a linear scan is fine.
+    private func value(in series: [CumulativeMinutePoint], at minute: Int) -> TimeInterval? {
+        guard !series.isEmpty else { return nil }
+        var match: CumulativeMinutePoint?
+        for p in series {
+            if p.minute > minute { break }
+            match = p
         }
-        if idx == peakHour {
-            return DashboardPalette.highlight
-        }
-        return DashboardPalette.accent.opacity(0.78)
+        return match?.seconds
     }
 
-    /// Label rules: hovered hour wins (shows precise duration), peak hour as
-    /// fallback. Other hours stay unlabeled to avoid axis clutter — the bar
-    /// height plus the y-axis still gives an approximate read.
     @ViewBuilder
-    private func annotation(for idx: Int, point: DailySeriesPoint) -> some View {
-        if idx == hoveredHour && point.seconds > 0 {
-            HourBadge(hour: idx, seconds: point.seconds,
-                      tint: DashboardPalette.accent,
-                      isHover: true)
-        } else if idx == peakHour && hoveredHour == nil && point.seconds > 0 {
-            HourBadge(hour: idx, seconds: point.seconds,
-                      tint: DashboardPalette.highlight,
-                      isHover: false)
-        }
-    }
-}
-
-/// Floating label that surfaces "Nh Mm at HHh" for the hovered or peak bar.
-/// Pulled out so the hover and peak presentations share styling — earlier they
-/// drifted apart (peak was plain text, hover was a chip) and looked unrelated.
-private struct HourBadge: View {
-    let hour: Int
-    let seconds: TimeInterval
-    let tint: Color
-    let isHover: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text("\(hour)시")
+    private func hoverBadge(minute: Int) -> some View {
+        let todaySec = value(in: today, at: minute)
+        let priorSec = value(in: prior, at: minute)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(hoverTimeLabel(minute: minute))
                 .font(.dbCaptionSmall)
-                .monospacedDigit()
                 .foregroundStyle(.secondary)
-            Text(TimeFormatting.longHMS(seconds))
-                .font(.dbCaptionSmall)
                 .monospacedDigit()
-                .foregroundStyle(tint)
-        }
-        .padding(.horizontal, isHover ? 7 : 0)
-        .padding(.vertical, isHover ? 2 : 0)
-        .background(
-            Group {
-                if isHover {
-                    Capsule().fill(tint.opacity(0.14))
+            HStack(spacing: 6) {
+                Circle().fill(DashboardPalette.accent).frame(width: 6, height: 6)
+                Text("오늘 \(TimeFormatting.longHMS(todaySec ?? 0))")
+                    .font(.dbCaptionSmall)
+                    .monospacedDigit()
+            }
+            if let p = priorSec {
+                HStack(spacing: 6) {
+                    Circle().stroke(priorColor, lineWidth: 1.2).frame(width: 6, height: 6)
+                    Text("전날 \(TimeFormatting.longHMS(p))")
+                        .font(.dbCaptionSmall)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                if let t = todaySec {
+                    let diff = t - p
+                    Text(diffLabel(diff))
+                        .font(.dbCaptionSmall)
+                        .monospacedDigit()
+                        .foregroundStyle(DashboardPalette.accent)
                 }
             }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(DashboardPalette.surfaceCard(dark: scheme == .dark))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(DashboardPalette.surfaceBorder(dark: scheme == .dark), lineWidth: 1)
+        )
+    }
+
+    private var legendChip: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 5) {
+                Capsule().fill(DashboardPalette.accent)
+                    .frame(width: 14, height: 2.4)
+                Text("오늘").font(.dbCaptionSmall).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 5) {
+                Capsule().fill(priorColor)
+                    .frame(width: 14, height: 1.6)
+                Text("전날").font(.dbCaptionSmall).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+    }
+
+    private func hourLabel(forMinute m: Int) -> String {
+        let h = m / 60
+        return h == 24 ? "24시" : "\(h)시"
+    }
+
+    private func hoverTimeLabel(minute: Int) -> String {
+        let h = minute / 60
+        let mm = minute % 60
+        return String(format: "%02d:%02d", h, mm)
+    }
+
+    private func diffLabel(_ diff: TimeInterval) -> String {
+        let sign = diff >= 0 ? "+" : "−"
+        let mins = Int(abs(diff).rounded() / 60)
+        return "차이 \(sign)\(mins)분"
+    }
+
+    private var priorColor: Color {
+        scheme == .dark
+            ? Color(.displayP3, red: 0.62, green: 0.62, blue: 0.70, opacity: 1)
+            : Color(.displayP3, red: 0.50, green: 0.50, blue: 0.58, opacity: 1)
     }
 }
 

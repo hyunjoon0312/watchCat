@@ -1,6 +1,11 @@
 import XCTest
 @testable import watchCat
 
+private extension AppCategory {
+    static var productivity:  AppCategory { builtIns.first { $0.id == "productivity"  }! }
+    static var entertainment: AppCategory { builtIns.first { $0.id == "entertainment" }! }
+}
+
 final class ExportImportTests: XCTestCase {
     private func makeStore() throws -> SessionStore { try SessionStore() }
 

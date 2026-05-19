@@ -350,6 +350,44 @@ final class SessionStore {
         return totals.reduce(0) { $0 + $1.seconds }
     }
 
+    /// Merged active spans for a calendar day as absolute (start, end) Dates.
+    /// Sister of `dailyActivityIntervals`, but preserves wall-clock times so
+    /// callers can label time ranges ("14:18 ~ 16:00"). Gaps between spans
+    /// indicate that `InactivityMonitor` closed a session (>= the user's idle
+    /// threshold, default ~3분) — i.e., the user was actually away, not just
+    /// switching apps, so each gap is a meaningful break.
+    func dailyActivitySpans(for date: Date, calendar: Calendar = .current,
+                            asOf: Date = Date()) throws -> [(start: Date, end: Date)] {
+        let dayStart = calendar.startOfDay(for: date)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let dayKey = DayKey.string(for: date, calendar: calendar)
+        let raw: [(Date, Date)] = try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT startAt, COALESCE(endAt, ?) AS endAt
+                FROM \(SessionRecord.databaseTableName)
+                WHERE day = ?
+                """, arguments: [asOf, dayKey])
+            return rows.map { (($0["startAt"] as Date), ($0["endAt"] as Date)) }
+        }
+        let clipped: [(Date, Date)] = raw.compactMap { (s, e) in
+            let cs = max(s, dayStart)
+            let ce = min(e, dayEnd)
+            guard ce > cs else { return nil }
+            return (cs, ce)
+        }
+        .sorted { $0.0 < $1.0 }
+        var merged: [(Date, Date)] = []
+        for iv in clipped {
+            if var last = merged.last, iv.0 <= last.1 {
+                last.1 = max(last.1, iv.1)
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(iv)
+            }
+        }
+        return merged
+    }
+
     /// Helper used by tests / debug — count of rows.
     func allSessions() throws -> [SessionRecord] {
         try dbQueue.read { db in

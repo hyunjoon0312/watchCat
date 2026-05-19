@@ -99,7 +99,10 @@ final class SessionStoreTests: XCTestCase {
         let start = dateAt(2026, 5, 13, 9, 0)
         _ = try store.startSession(at: start, bundleID: "com.apple.dt.Xcode", displayName: "Xcode")
         let totals = try store.dailyTotals(for: start, asOf: start)
-        XCTAssertEqual(totals.first?.seconds ?? -1, 0, accuracy: 0.01)
+        // A 0-duration open session is below `minimumAppSeconds` (60s) and is
+        // filtered out of per-app aggregation — that's the regression guard:
+        // the row must not surface as a negative/garbage value.
+        XCTAssertTrue(totals.isEmpty)
     }
 
     /// Regression: prior crashes/force-quits left rows with `endAt IS NULL`. Live
@@ -125,13 +128,25 @@ final class SessionStoreTests: XCTestCase {
 
         try store.closeOrphanedSessions()
 
-        // Live aggregate with asOf far in the future — orphans must read as zero.
-        let later = start.addingTimeInterval(10_000)
-        let totals = try store.dailyTotals(for: start, asOf: later)
-        let bundleSeconds = Dictionary(uniqueKeysWithValues: totals.map { ($0.bundleID, $0.seconds) })
-        XCTAssertEqual(bundleSeconds["com.apple.dt.Xcode"] ?? -1, 0, accuracy: 0.01)
-        XCTAssertEqual(bundleSeconds["com.apple.systempreferences"] ?? -1, 0, accuracy: 0.01)
-        // watchCat has one closed 30s row plus one orphan that's now 0s.
-        XCTAssertEqual(bundleSeconds["com.dayflow.watchCat"] ?? -1, 30, accuracy: 0.01)
+        // Inspect raw rows: `dailyTotals` would filter every row here by the
+        // `minimumAppSeconds` threshold, but the regression we're guarding is
+        // that orphans get clamped (endAt = startAt) so they no longer read
+        // as "still running" when the next session aggregation runs.
+        let rows = try store.allSessions()
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertTrue(rows.allSatisfy { $0.endAt != nil },
+                      "closeOrphanedSessions leaves no NULL endAt rows")
+        let orphans = rows.filter { row in
+            guard let end = row.endAt else { return false }
+            return end == row.startAt
+        }
+        XCTAssertEqual(orphans.count, 3, "3 orphans clamped to zero length")
+        let healthy = rows.filter { row in
+            guard let end = row.endAt else { return false }
+            return end != row.startAt
+        }
+        XCTAssertEqual(healthy.count, 1)
+        XCTAssertEqual(healthy.first?.endAt?.timeIntervalSince(healthy.first!.startAt) ?? -1,
+                       30, accuracy: 0.01, "healthy 30s row untouched")
     }
 }

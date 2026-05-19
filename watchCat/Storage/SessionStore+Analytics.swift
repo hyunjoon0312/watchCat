@@ -27,6 +27,44 @@ struct HeatmapCell: Equatable {
     let seconds: TimeInterval
 }
 
+/// One sample of cumulative active seconds at `minute` minutes past midnight.
+/// Used by the day-mode "오늘 vs 어제 누적 활성도" chart.
+struct CumulativeMinutePoint: Equatable {
+    let minute: Int
+    let seconds: TimeInterval
+}
+
+/// "Time to first break" insight — the user's first continuous activity span
+/// of the day, plus the 14-day baseline for "평소 N분 만에 쉼" comparison.
+struct FirstBreakInsight: Equatable {
+    let span: (start: Date, end: Date)
+    /// Average across the last 14 days excluding `span.start`'s day. `nil` when
+    /// no prior day had any activity (e.g., first day of use) — the UI shows
+    /// the today number alone without a comparison chip.
+    let baselineSeconds: TimeInterval?
+    var seconds: TimeInterval { span.end.timeIntervalSince(span.start) }
+
+    static func == (lhs: FirstBreakInsight, rhs: FirstBreakInsight) -> Bool {
+        lhs.span.start == rhs.span.start
+            && lhs.span.end == rhs.span.end
+            && lhs.baselineSeconds == rhs.baselineSeconds
+    }
+}
+
+/// "Longest deep-work span" insight — longest continuous activity block of
+/// the day (any app), plus the 14-day baseline for "평소 최장 N분" comparison.
+struct LongestSpanInsight: Equatable {
+    let span: (start: Date, end: Date)
+    let baselineSeconds: TimeInterval?
+    var seconds: TimeInterval { span.end.timeIntervalSince(span.start) }
+
+    static func == (lhs: LongestSpanInsight, rhs: LongestSpanInsight) -> Bool {
+        lhs.span.start == rhs.span.start
+            && lhs.span.end == rhs.span.end
+            && lhs.baselineSeconds == rhs.baselineSeconds
+    }
+}
+
 extension SessionStore {
 
     // MARK: - Range queries (app sessions)
@@ -243,6 +281,89 @@ extension SessionStore {
         return (0..<24).map {
             DailySeriesPoint(day: String(format: "%02d", $0), seconds: perHour[$0] ?? 0)
         }
+    }
+
+    /// Cumulative active seconds sampled every `stepMinutes` from midnight.
+    /// For "today" (calendar-same-day as `asOf`) the series stops at the
+    /// current minute so the line doesn't visually project a flat extension
+    /// into the future. Past days run the full 24h.
+    func cumulativeMinuteSeries(for date: Date, stepMinutes: Int = 5,
+                                calendar: Calendar = .current,
+                                asOf: Date = Date()) throws -> [CumulativeMinutePoint] {
+        let spans = try dailyActivitySpans(for: date, calendar: calendar, asOf: asOf)
+        let dayStart = calendar.startOfDay(for: date)
+        let isToday = calendar.isDate(date, inSameDayAs: asOf)
+        let maxMinute: Int = {
+            if isToday {
+                let mins = Int(asOf.timeIntervalSince(dayStart) / 60)
+                return max(0, min(1440, mins))
+            }
+            return 1440
+        }()
+        let step = max(1, stepMinutes)
+        var out: [CumulativeMinutePoint] = []
+        var minute = 0
+        while minute <= maxMinute {
+            let cutoff = dayStart.addingTimeInterval(TimeInterval(minute) * 60)
+            var cum: TimeInterval = 0
+            for span in spans {
+                if span.start >= cutoff { break }  // spans are sorted by start
+                cum += min(span.end, cutoff).timeIntervalSince(span.start)
+            }
+            out.append(CumulativeMinutePoint(minute: minute, seconds: cum))
+            minute += step
+        }
+        return out
+    }
+
+    // MARK: - Day-rhythm insights
+
+    /// "First break" + 14-day baseline for the given day. Returns `nil` when
+    /// the day has no activity at all.
+    func firstBreakInsight(on date: Date, baselineDays: Int = 14,
+                           calendar: Calendar = .current,
+                           asOf: Date = Date()) throws -> FirstBreakInsight? {
+        guard let span = try dailyActivitySpans(for: date, calendar: calendar, asOf: asOf).first
+            else { return nil }
+        let baseline = try averageDailyMetric(endingBefore: date, days: baselineDays,
+                                              calendar: calendar, asOf: asOf) { day in
+            try dailyActivitySpans(for: day, calendar: calendar, asOf: asOf).first
+                .map { $0.end.timeIntervalSince($0.start) }
+        }
+        return FirstBreakInsight(span: span, baselineSeconds: baseline)
+    }
+
+    /// "Longest continuous span" + 14-day baseline for the given day.
+    func longestSpanInsight(on date: Date, baselineDays: Int = 14,
+                            calendar: Calendar = .current,
+                            asOf: Date = Date()) throws -> LongestSpanInsight? {
+        let spans = try dailyActivitySpans(for: date, calendar: calendar, asOf: asOf)
+        guard let longest = spans.max(by: {
+            $0.end.timeIntervalSince($0.start) < $1.end.timeIntervalSince($1.start)
+        }) else { return nil }
+        let baseline = try averageDailyMetric(endingBefore: date, days: baselineDays,
+                                              calendar: calendar, asOf: asOf) { day in
+            try dailyActivitySpans(for: day, calendar: calendar, asOf: asOf)
+                .map { $0.end.timeIntervalSince($0.start) }.max()
+        }
+        return LongestSpanInsight(span: longest, baselineSeconds: baseline)
+    }
+
+    /// Average a per-day metric over `days` calendar days ending just before
+    /// `referenceDay`. Days where `compute` returns nil are skipped so a string
+    /// of zero-activity days doesn't drag the "평소" baseline toward 0.
+    private func averageDailyMetric(endingBefore referenceDay: Date, days: Int,
+                                    calendar: Calendar, asOf: Date,
+                                    _ compute: (Date) throws -> TimeInterval?) throws -> TimeInterval? {
+        let refStart = calendar.startOfDay(for: referenceDay)
+        var values: [TimeInterval] = []
+        for offset in 1...max(1, days) {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: refStart)
+                else { continue }
+            if let v = try compute(day) { values.append(v) }
+        }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
     }
 
     // MARK: - Retention

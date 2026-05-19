@@ -1,6 +1,11 @@
 import XCTest
 @testable import watchCat
 
+private extension AppCategory {
+    static var productivity:  AppCategory { builtIns.first { $0.id == "productivity"  }! }
+    static var entertainment: AppCategory { builtIns.first { $0.id == "entertainment" }! }
+}
+
 final class AnalyticsQueriesTests: XCTestCase {
     private func makeStore() throws -> SessionStore { try SessionStore() }
 
@@ -101,6 +106,125 @@ final class AnalyticsQueriesTests: XCTestCase {
         XCTAssertEqual(hourly[3].seconds, 0, "untouched hours stay zero")
         XCTAssertEqual(hourly[0].day, "00")
         XCTAssertEqual(hourly[23].day, "23")
+    }
+
+    // MARK: - Day-rhythm insights
+
+    /// Helper that adds a session spanning arbitrary start→end on a specific day.
+    @discardableResult
+    private func addSpan(_ store: SessionStore, start: Date, end: Date,
+                         bundleID: String = "x", name: String = "X") throws -> Date {
+        let id = try store.startSession(at: start, bundleID: bundleID, displayName: name)
+        try store.endSession(id: id, at: end)
+        return end
+    }
+
+    func test_firstBreakInsight_isFirstContiguousSpan() throws {
+        let store = try makeStore()
+        let day = date(2026, 5, 13)
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: day)
+        // 09:00–10:30 → break → 11:00–11:45 → break → 14:00–15:30
+        let s1 = cal.date(byAdding: .minute, value: 9 * 60, to: dayStart)!
+        let e1 = cal.date(byAdding: .minute, value: 10 * 60 + 30, to: dayStart)!
+        let s2 = cal.date(byAdding: .minute, value: 11 * 60, to: dayStart)!
+        let e2 = cal.date(byAdding: .minute, value: 11 * 60 + 45, to: dayStart)!
+        let s3 = cal.date(byAdding: .minute, value: 14 * 60, to: dayStart)!
+        let e3 = cal.date(byAdding: .minute, value: 15 * 60 + 30, to: dayStart)!
+        try addSpan(store, start: s1, end: e1)
+        try addSpan(store, start: s2, end: e2)
+        try addSpan(store, start: s3, end: e3)
+
+        let insight = try XCTUnwrap(try store.firstBreakInsight(on: day, baselineDays: 14))
+        XCTAssertEqual(insight.span.start, s1)
+        XCTAssertEqual(insight.span.end, e1)
+        XCTAssertEqual(insight.seconds, 90 * 60, accuracy: 0.5)
+        // No prior days have activity → baseline nil.
+        XCTAssertNil(insight.baselineSeconds)
+    }
+
+    func test_firstBreakInsight_mergesAdjacentSessions() throws {
+        let store = try makeStore()
+        let day = date(2026, 5, 13)
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: day)
+        // Two adjacent app sessions with no gap should merge into one span,
+        // so 첫 휴식 = 두 세션 합산이 된다.
+        let s1 = cal.date(byAdding: .minute, value: 9 * 60, to: dayStart)!
+        let e1 = cal.date(byAdding: .minute, value: 9 * 60 + 30, to: dayStart)!
+        let s2 = e1  // adjacent (app switch with no idle)
+        let e2 = cal.date(byAdding: .minute, value: 10 * 60 + 15, to: dayStart)!
+        // Then a break, then another session
+        let s3 = cal.date(byAdding: .minute, value: 11 * 60, to: dayStart)!
+        let e3 = cal.date(byAdding: .minute, value: 11 * 60 + 20, to: dayStart)!
+        try addSpan(store, start: s1, end: e1, bundleID: "a", name: "A")
+        try addSpan(store, start: s2, end: e2, bundleID: "b", name: "B")
+        try addSpan(store, start: s3, end: e3, bundleID: "a", name: "A")
+
+        let insight = try XCTUnwrap(try store.firstBreakInsight(on: day, baselineDays: 7))
+        XCTAssertEqual(insight.seconds, 75 * 60, accuracy: 0.5,
+                       "9:00–10:15 = 75분이 첫 휴식까지의 시간")
+    }
+
+    func test_longestSpanInsight_picksLongestRegardlessOfOrder() throws {
+        let store = try makeStore()
+        let day = date(2026, 5, 13)
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: day)
+        let s1 = cal.date(byAdding: .minute, value: 9 * 60, to: dayStart)!
+        let e1 = cal.date(byAdding: .minute, value: 9 * 60 + 40, to: dayStart)!
+        let s2 = cal.date(byAdding: .minute, value: 13 * 60, to: dayStart)!
+        let e2 = cal.date(byAdding: .minute, value: 15 * 60 + 5, to: dayStart)!  // 2h 5m
+        let s3 = cal.date(byAdding: .minute, value: 18 * 60, to: dayStart)!
+        let e3 = cal.date(byAdding: .minute, value: 18 * 60 + 25, to: dayStart)!
+        try addSpan(store, start: s1, end: e1)
+        try addSpan(store, start: s2, end: e2)
+        try addSpan(store, start: s3, end: e3)
+
+        let insight = try XCTUnwrap(try store.longestSpanInsight(on: day, baselineDays: 14))
+        XCTAssertEqual(insight.span.start, s2)
+        XCTAssertEqual(insight.span.end, e2)
+        XCTAssertEqual(insight.seconds, 125 * 60, accuracy: 0.5)
+    }
+
+    func test_baselines_averageOverPriorDaysAndSkipEmpty() throws {
+        let store = try makeStore()
+        let cal = Calendar.current
+        let today = date(2026, 5, 20)
+        // 3일치 이전 데이터: 5/17(첫 휴식 60분, 최장 60분), 5/18(데이터 없음), 5/19(첫 휴식 30분, 최장 90분)
+        func add(day d: Date, firstStart hStart: Int, firstMin: Int,
+                 secondStart sh: Int? = nil, secondMin: Int = 0) throws {
+            let dStart = cal.startOfDay(for: d)
+            let s1 = cal.date(byAdding: .minute, value: hStart * 60, to: dStart)!
+            let e1 = cal.date(byAdding: .minute, value: hStart * 60 + firstMin, to: dStart)!
+            try addSpan(store, start: s1, end: e1)
+            if let sh {
+                // 2-hour gap forces a separate span
+                let s2 = cal.date(byAdding: .minute, value: sh * 60, to: dStart)!
+                let e2 = cal.date(byAdding: .minute, value: sh * 60 + secondMin, to: dStart)!
+                try addSpan(store, start: s2, end: e2)
+            }
+        }
+        try add(day: date(2026, 5, 17), firstStart: 9, firstMin: 60)
+        // skip 5/18
+        try add(day: date(2026, 5, 19), firstStart: 9, firstMin: 30,
+                secondStart: 13, secondMin: 90)
+        // Today's data so the insight is non-nil
+        try add(day: today, firstStart: 10, firstMin: 45)
+
+        let firstBreak = try XCTUnwrap(try store.firstBreakInsight(on: today, baselineDays: 14))
+        // baseline = avg(60, 30) = 45m (5/18 empty day is skipped)
+        XCTAssertEqual(firstBreak.baselineSeconds ?? -1, 45 * 60, accuracy: 0.5)
+
+        let longest = try XCTUnwrap(try store.longestSpanInsight(on: today, baselineDays: 14))
+        // baseline = avg(60, 90) = 75m
+        XCTAssertEqual(longest.baselineSeconds ?? -1, 75 * 60, accuracy: 0.5)
+    }
+
+    func test_insights_returnNil_whenDayIsEmpty() throws {
+        let store = try makeStore()
+        XCTAssertNil(try store.firstBreakInsight(on: date(2026, 5, 13)))
+        XCTAssertNil(try store.longestSpanInsight(on: date(2026, 5, 13)))
     }
 
     func test_categoryTotals_inRange_groupsAcrossDays() throws {

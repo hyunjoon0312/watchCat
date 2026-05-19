@@ -49,6 +49,17 @@ final class DashboardViewModel: ObservableObject {
     /// "꺼짐"(슬립/종료) 구간. 활동 구간 외에서도 휴식과 꺼짐을 시각·라벨로
     /// 분리하기 위함. day 모드에서만 채워짐.
     @Published private(set) var dayOffIntervals: [(start: Double, end: Double)] = []
+    /// Day-mode insight: 첫 활동 ~ 첫 휴식까지의 연속 활동 + 14일 baseline.
+    /// `.day` 모드에서만 채워짐. nil이면 해당 날짜에 활동이 없음.
+    @Published private(set) var firstBreakInsight: FirstBreakInsight?
+    /// Day-mode insight: 오늘의 최장 연속 활동 구간(앱 무관) + 14일 baseline.
+    @Published private(set) var longestSpanInsight: LongestSpanInsight?
+    /// Day-mode cumulative-activity series for the selected day. `.day` 전용.
+    @Published private(set) var selectedDayCumulative: [CumulativeMinutePoint] = []
+    /// Same series for the calendar day immediately before `range.start` — drawn
+    /// as a dashed overlay so the user can compare pacing. Empty when there's
+    /// no prior-day data.
+    @Published private(set) var priorDayCumulative: [CumulativeMinutePoint] = []
     @Published private(set) var topAppSeries: [AppDailySeries] = []
     @Published private(set) var heatmap: [HeatmapCell] = []
     @Published private(set) var categoryMapping: [String: AppCategory] = [:]
@@ -126,6 +137,10 @@ final class DashboardViewModel: ObservableObject {
             dailySeries = []; topAppSeries = []; heatmap = []
             dayActivityIntervals = []
             dayOffIntervals = []
+            firstBreakInsight = nil
+            longestSpanInsight = nil
+            selectedDayCumulative = []
+            priorDayCumulative = []
             loadError = "DB 사용 불가 — 권한 또는 디스크 접근 문제일 수 있습니다."
             return
         }
@@ -154,6 +169,26 @@ final class DashboardViewModel: ObservableObject {
             self.dayOffIntervals = period == .day
                 ? try store.dailyOffIntervals(for: r.start, calendar: calendar, asOf: now)
                 : []
+            if period == .day {
+                self.firstBreakInsight = try store.firstBreakInsight(
+                    on: r.start, calendar: calendar, asOf: now)
+                self.longestSpanInsight = try store.longestSpanInsight(
+                    on: r.start, calendar: calendar, asOf: now)
+                self.selectedDayCumulative = try store.cumulativeMinuteSeries(
+                    for: r.start, calendar: calendar, asOf: now)
+                if let prior = calendar.date(byAdding: .day, value: -1, to: r.start) {
+                    let series = try store.cumulativeMinuteSeries(
+                        for: prior, calendar: calendar, asOf: now)
+                    self.priorDayCumulative = series.last?.seconds ?? 0 > 0 ? series : []
+                } else {
+                    self.priorDayCumulative = []
+                }
+            } else {
+                self.firstBreakInsight = nil
+                self.longestSpanInsight = nil
+                self.selectedDayCumulative = []
+                self.priorDayCumulative = []
+            }
             let prev = DashboardRange.shift(r, period: period, by: -1, calendar: calendar)
             self.previousTotalSeconds = try store.totalSeconds(in: prev, asOf: now)
             self.loadError = nil
