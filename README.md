@@ -1,6 +1,12 @@
 # watchCat 🐱
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
+[![Platform: macOS 14+](https://img.shields.io/badge/Platform-macOS%2014+-black.svg)](#빌드)
+
 **맥 사용시간 자동 기록기** — 상태바의 마스코트가 기록 상태를 직관적으로 보여주는 macOS 메뉴바 앱.
+
+> 🛠️ 이 프로젝트는 [Claude Code](https://claude.com/claude-code)를 활용해 단독 개발한 **오픈소스(MIT)** 앱입니다. 명세 작성부터 SwiftUI/GRDB 구현, 시스템 연동, Homebrew 배포까지 전 과정을 Claude Code와 함께 만들었습니다.
 
 하루 동안 어떤 앱과 웹사이트에 시간을 쓰는지 백그라운드에서 자동으로 추적합니다. 잠금·슬립·자리비움 구간은 기록에서 제외해 데이터가 왜곡되지 않으며, 모든 데이터는 **로컬에만 저장**되고 외부로 전송되지 않습니다.
 
@@ -90,6 +96,12 @@ SPEC.md             제품 명세 (기능 목록·수용 기준·검증 방법)
 
 새 버전 릴리스 절차(버전 갱신 → 빌드 → zip/해시 → 태그 → GitHub Release → Cask 갱신)는 [dist/INSTALL.md](dist/INSTALL.md)의 "새 버전 릴리스 절차"를 따릅니다.
 
+## 개발
+
+watchCat은 [Claude Code](https://claude.com/claude-code)를 활용해 1인 풀스택으로 개발했습니다. 활성 앱·브라우저 탭 추적, 잠금/슬립/유휴 구간 제외 같은 까다로운 macOS 시스템 연동부터 SwiftUI 대시보드, 권한 온보딩, Homebrew Cask 배포까지 Claude Code와 함께 반복 개발했습니다.
+
 ## 라이선스
 
-© 2026 watchCat
+[MIT License](LICENSE) © 2026 rian
+
+오픈소스로 공개되어 있으며, 자유롭게 사용·수정·재배포할 수 있습니다. 기여(이슈·PR)를 환영합니다.
